@@ -86,12 +86,13 @@ export async function loadDocs(engine: { actions: RevisoActions }, server: strin
   }
   engine.actions.setDocs('loading', [], '')
   try {
-    const res = await fetch(`${server.replace(/\/$/, '')}/api/dashboard/documents`, {
+    const base = server.replace(/\/$/, '')
+    const res = await fetch(`${base}/api/dashboard/documents`, {
       headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const body: unknown = await res.json()
-    const rows = extractDocs(body)
+    const rows = extractDocs(body, base)
     if (rows.length === 0) throw new Error('响应中没有文档列表')
     engine.actions.setDocs('live', rows, '')
   } catch (err) {
@@ -100,14 +101,17 @@ export async function loadDocs(engine: { actions: RevisoActions }, server: strin
   }
 }
 
-/** Defensive extraction: accept {documents|items|data: [...]}, pass through arrays. */
-function extractDocs(body: unknown): RevisoDoc[] {
+/** Defensive extraction: accept {documents|items|data|reviews: [...]}, pass through arrays.
+ * `reviews` is the dashboard endpoint's legacy row key (server naming vestige);
+ * its rows key the doc as `document_id` and carry no URL — build one from base. */
+function extractDocs(body: unknown, base = ''): RevisoDoc[] {
   const list = Array.isArray(body)
     ? body
     : typeof body === 'object' && body !== null
       ? ((body as Record<string, unknown>).documents
         ?? (body as Record<string, unknown>).items
-        ?? (body as Record<string, unknown>).data)
+        ?? (body as Record<string, unknown>).data
+        ?? (body as Record<string, unknown>).reviews)
       : undefined
   if (!Array.isArray(list)) return []
   return list.flatMap((row): RevisoDoc[] => {
@@ -115,12 +119,14 @@ function extractDocs(body: unknown): RevisoDoc[] {
     const r = row as Record<string, unknown>
     const title = typeof r.title === 'string' ? r.title : ''
     if (title === '') return []
+    const documentId = typeof r.document_id === 'string' ? r.document_id : ''
     return [{
-      id: typeof r.id === 'string' ? r.id : title,
+      id: typeof r.id === 'string' ? r.id : documentId || title,
       title,
       updated: typeof r.updated_at === 'string' ? r.updated_at.slice(0, 10)
         : typeof r.updatedAt === 'string' ? r.updatedAt.slice(0, 10) : '',
-      url: typeof r.url === 'string' ? r.url : '',
+      url: typeof r.url === 'string' && r.url !== '' ? r.url
+        : documentId !== '' && base !== '' ? `${base}/reviews/${documentId}` : '',
     }]
   })
 }

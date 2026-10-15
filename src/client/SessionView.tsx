@@ -48,9 +48,15 @@ export function RevisoSessionView(props: SessionViewProps) {
         if (!Array.isArray(rows)) throw new Error('响应格式不符')
         const mapped = rows.flatMap(row => {
           const r = row as Record<string, unknown>
-          return typeof r.title === 'string'
-            ? [{ id: typeof r.id === 'string' ? r.id : r.title, title: r.title, updated: typeof r.updated_at === 'string' ? r.updated_at.slice(0, 10) : '', url: typeof r.url === 'string' ? r.url : '' }]
-            : []
+          if (typeof r.title !== 'string') return []
+          const documentId = typeof r.document_id === 'string' ? r.document_id : ''
+          return [{
+            id: typeof r.id === 'string' ? r.id : documentId || r.title,
+            title: r.title,
+            updated: typeof r.updated_at === 'string' ? r.updated_at.slice(0, 10) : '',
+            url: typeof r.url === 'string' && r.url !== '' ? r.url
+              : documentId !== '' ? `${server}/reviews/${documentId}` : '',
+          }]
         })
         if (alive) { setStatus('live'); setDocs(mapped); setMessage('') }
       })
@@ -58,7 +64,7 @@ export function RevisoSessionView(props: SessionViewProps) {
         if (alive) {
           setStatus('demo')
           setDocs(demoDocs())
-          setMessage(`拉取失败（${err instanceof Error ? err.message : String(err)}）—— L0 契约未上线前返回演示数据。本会话键：dsh:${sessionId.slice(0, 12)}`)
+          setMessage(`拉取失败（${err instanceof Error ? err.message : String(err)}）—— 显示演示数据。检查 server/token 与部署端 REVISO_CORS_ALLOWLIST。本会话键：dsh:${sessionId.slice(0, 12)}`)
         }
       })
     return () => { alive = false }
