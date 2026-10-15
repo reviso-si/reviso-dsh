@@ -1,0 +1,6 @@
+# Bundle patch: applied when a profile lists dsh-reviso in dsh.profile.bundles.
+# Rows reference this package by name so Node resolution finds the installed
+# code (DSH docs/user/develop/basic/publish.md).
+- insert:
+    - id: reviso-dsh
+      name: dsh-reviso

@@ -1,0 +1,21 @@
+{
+  "name": "dsh-reviso",
+  "version": "0.1.0",
+  "description": "Reviso for DeepSeek Harness: publish agent output for human review and find it again from the session.",
+  "type": "module",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "cordis.patch.yml"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/reviso-si/reviso-dsh.git"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
