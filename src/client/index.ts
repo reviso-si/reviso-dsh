@@ -2,6 +2,7 @@ import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import { createRevisoStore, loadDocs } from './state.ts'
 import { RevisoFooterAction } from './FooterAction.tsx'
 import { RevisoPanel } from './Panel.tsx'
+import { RevisoSessionView } from './SessionView.tsx'
 
 /** Required service: the UI slot registry. */
 export const inject = ['slots']
@@ -25,6 +26,14 @@ export function apply(ctx: ClientContext): void {
         store,
         inject: () => ({ onToggle: () => engine.actions.togglePanel() }),
       }, RevisoFooterAction))
+
+    ctx.slots.inject('conversation.view', () =>
+      ctx.slots.register({
+        name: 'conversation.view',
+        id: 'reviso-dsh.view',
+        order: 100,
+        label: 'Reviso',
+      }, RevisoSessionView))
 
     ctx.slots.inject('shell.overlay', () =>
       ctx.slots.register({

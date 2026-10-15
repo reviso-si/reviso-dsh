@@ -11,8 +11,9 @@ Reviso for DeepSeek Harness (DSH) — the DSH surface of the Reviso family.
 
 ## Status: Phase 1 — visible client face (verified in a live browser)
 
-Implemented: a `sidebar.footer.action` entry (`id: reviso-dsh.action`) + a
-`shell.overlay` panel (`id: reviso-dsh.panel`) listing Reviso documents.
+Implemented, two views:
+- Sidebar entry (`sidebar.footer.action`, beside Settings) + `shell.overlay` panel — ALL Reviso documents for the user.
+- Session view tab (`conversation.view`, id `reviso-dsh.view`, beside chat | trajectory) — documents produced by THIS session (binding key `session_key = dsh:<sessionId>`, served once the reviso L0 contract lands).
 Demo mode (labeled 演示) is the default; fill Server + Token in the panel's
 连接设置 to hit a real deployment (auth: `Authorization: Bearer <automation
 key or account-agent token>`; the deployment must allow this origin via

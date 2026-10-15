@@ -22,6 +22,7 @@
 | key | kind/scope | 契约要点 | 证据 |
 |---|---|---|---|
 | `sidebar.footer.action` | list, root | "Optional actions beside Settings at the sidebar foot"，每个 action 收到列状态（wide row vs 56px rail） | catalog:1670；声明者 `ui-sidebar` 的 `'sidebar'` entry（`packages/client/ui-sidebar/src/client/index.ts:47-53`） |
+| `conversation.view` | list, session | "one list entry per view tab (chat here; trajectory/waterfall from ui-trajectory)"，owner 以 `only: <active id>` 逐个渲染；标准 props 直接给 `sessionId`（会话级数据绑定的关键）；occupants=chat/trajectory，replaceRisk none | catalog:1095；声明者 client-ui-conversation（`ui-conversation/src/client/contract/slots.ts:113`） |
 | `shell.overlay` | list, root | 全壳浮层，"click-through —— entries opt back into pointer events"；**"the additive seat for a frame-wide surface of your own: a fresh `id` is added beside the shipped entries"**；`replaceRisk: 'none'`，occupants 目前为空 | catalog:1551；声明者 client-ui-layout root entry（`ui-layout/src/client/index.ts:83`） |
 
 ⚠ `sidebar.settings`（catalog:1715）是 `single` 且 `replaceRisk: 'shadows-shipped-ui'` —— 不要去占。
