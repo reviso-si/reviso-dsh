@@ -75,7 +75,7 @@ export function RevisoSessionView(props: SessionViewProps) {
       <div style={{ marginBottom: 10, fontSize: 11, color: status === 'demo' ? '#9a6700' : '#57606a', background: status === 'demo' ? '#fff8c5' : 'transparent', display: 'inline-block', padding: '2px 8px', borderRadius: 4 }}>
         {statusLabel[status]}{message === '' ? '' : ` — ${message}`}
       </div>
-      <div style={{ fontSize: 11, color: '#8c959f', marginBottom: 8 }}>
+      <div style={{ fontSize: 11, color: '#8c959f', marginBottom: 8 }} title={sessionId === '' ? undefined : `session_key: dsh:${sessionId}`}>
         本会话产生的 Reviso 文档{sessionId === '' ? '' : `（session_key: dsh:${sessionId.slice(0, 12)}…）`}
       </div>
       {docs.length === 0
