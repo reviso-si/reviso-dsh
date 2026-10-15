@@ -4,8 +4,14 @@
   "description": "Reviso for DeepSeek Harness: publish agent output for human review and find it again from the session.",
   "type": "module",
   "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
   "files": [
     "index.js",
+    "lib/client.js",
     "cordis.patch.yml"
   ],
   "license": "MIT",
@@ -13,9 +19,21 @@
     "type": "git",
     "url": "https://github.com/reviso-si/reviso-dsh.git"
   },
+  "scripts": {
+    "build:client": "tsdown"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime"
+      ],
+      "platform": "web"
     }
+  },
+  "devDependencies": {
+    "tsdown": "^0.12.9"
   }
 }
