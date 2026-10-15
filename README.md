@@ -9,7 +9,16 @@ Reviso for DeepSeek Harness (DSH) — the DSH surface of the Reviso family.
 | `reviso-cli` | CLI |
 | **`reviso-dsh`** | DSH host integration (this repo) |
 
-## Status: Phase 0 scaffold
+## Status: Phase 1 — visible client face (verified in a live browser)
+
+Implemented: a `sidebar.footer.action` entry (`id: reviso-dsh.action`) + a
+`shell.overlay` panel (`id: reviso-dsh.panel`) listing Reviso documents.
+Demo mode (labeled 演示) is the default; fill Server + Token in the panel's
+连接设置 to hit a real deployment (auth: `Authorization: Bearer <automation
+key or account-agent token>`; the deployment must allow this origin via
+`REVISO_CORS_ALLOWLIST`).
+
+Slot/build contract: see docs/client-face-contract.md.
 
 Minimal DSH bundle that loads under the harness. Roadmap:
 
@@ -58,6 +67,16 @@ The cross-repo contract (Reviso HTTP API + `source_kind` enum
 the `reviso` main repo (L0). This package never talks to Supabase directly.
 
 Tested with dsh `0.1.0-rc.8`.
+
+## See it locally
+
+`sh
+pnpm install && pnpm run build:client   # produce lib/client.js
+dsh plugin --profile web add /Users/touchskyer/Code/reviso-projects/reviso-dsh
+dsh web                                  # Reviso entry sits beside Settings in the sidebar
+`
+
+Rollback: `dsh plugin --profile web remove dsh-reviso`.
 
 ## License
 
