@@ -20,6 +20,7 @@ export function createOAuthBridge(ctx, options = {}) {
 
   const defaultServer = normalizeServer(options.server || DEFAULT_SERVER)
   const pending = new Map()
+  const clients = new Map()
   const disposers = [
     ctx.webServer.register({
       kind: 'exact',
@@ -29,7 +30,7 @@ export function createOAuthBridge(ctx, options = {}) {
     ctx.webServer.register({
       kind: 'exact',
       path: '/plugins/reviso/auth/start',
-      handler: (req, res) => handleStart(ctx, req, res, defaultServer, pending),
+      handler: (req, res) => handleStart(ctx, req, res, defaultServer, pending, clients),
     }),
     ctx.webServer.register({
       kind: 'exact',
@@ -96,7 +97,7 @@ async function handleDashboard(ctx, req, res) {
   }
 }
 
-async function handleStart(ctx, req, res, defaultServer, pending) {
+async function handleStart(ctx, req, res, defaultServer, pending, clients) {
   if (!isLoopback(req)) return forbidden(res)
   try {
     const url = new URL(req.url || '', `http://${req.headers.host || '127.0.0.1'}`)
@@ -104,7 +105,7 @@ async function handleStart(ctx, req, res, defaultServer, pending) {
     const origin = `http://${req.headers.host}`
     const redirectUri = `${origin}/plugins/reviso/auth/callback`
     const metadata = await oauthMetadata(server)
-    const clientId = await registerClient(metadata, redirectUri)
+    const clientId = await registerClient(metadata, redirectUri, clients)
     const state = base64url(randomBytes(24))
     const verifier = base64url(randomBytes(32))
     pending.set(state, {
@@ -199,7 +200,10 @@ async function oauthMetadata(server) {
   return data
 }
 
-async function registerClient(metadata, redirectUri) {
+async function registerClient(metadata, redirectUri, clients) {
+  const cacheKey = `${metadata.registration_endpoint}|${redirectUri}`
+  const cached = clients.get(cacheKey)
+  if (cached !== undefined) return cached
   const result = await oauthJson(metadata.registration_endpoint, {
     client_name: 'Reviso for DeepSeek Harness',
     redirect_uris: [redirectUri],
@@ -210,6 +214,7 @@ async function registerClient(metadata, redirectUri) {
   if (typeof result.client_id !== 'string' || result.client_id === '') {
     throw new Error('Reviso client registration returned no client_id')
   }
+  clients.set(cacheKey, result.client_id)
   return result.client_id
 }
 

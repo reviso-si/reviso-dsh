@@ -102,6 +102,11 @@ test('runs the OAuth start/callback flow without exposing the token', async () =
     assert.ok(location.searchParams.get('code_challenge'))
     const state = location.searchParams.get('state')
 
+    const secondStart = response()
+    await routes.get('/plugins/reviso/auth/start')(request('/plugins/reviso/auth/start'), secondStart)
+    assert.equal(secondStart.status, 302)
+    assert.equal(fakeFetch.calls.filter(call => call.url.endsWith('/oauth/register')).length, 1)
+
     const callbackRes = response()
     await routes.get('/plugins/reviso/auth/callback')(
       request(`/plugins/reviso/auth/callback?code=code_1&state=${state}`),
