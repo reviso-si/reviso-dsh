@@ -21,6 +21,30 @@ key or account-agent token>`; the deployment must allow this origin via
 
 Slot/build contract: see docs/client-face-contract.md.
 
+## Host-owned publish tool (spike)
+
+`index.js` registers `reviso_publish` on the DSH Host. The agent passes title
+and content; the tool resolves the DSH credential record `REVISO_DSH`,
+reads the calling session id from `exec.agent.session.header.id`, and posts to
+Reviso with `source_kind=dsh` plus `source_session_id`. The token never enters
+the browser or an agent child process.
+
+Credential record shape (`$DSH_HOME/.credentials.yaml`):
+
+```yaml
+version: 1
+records:
+  REVISO_DSH:
+    kind: grant
+    payload:
+      token: rak_...
+      workspaceId: wsp_...
+      server: https://reviso.work
+```
+
+Contract test: `npm test`.
+
+
 Minimal DSH bundle that loads under the harness. Roadmap:
 
 1. **Phase 0 (here)** — bundle skeleton, load-verified locally.

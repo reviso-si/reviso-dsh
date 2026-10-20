@@ -20,7 +20,8 @@
     "url": "https://github.com/reviso-si/reviso-dsh.git"
   },
   "scripts": {
-    "build:client": "tsdown"
+    "build:client": "tsdown",
+    "test": "node --test test/*.test.mjs"
   },
   "dsh": {
     "bundle": {
