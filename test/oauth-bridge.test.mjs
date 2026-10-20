@@ -41,6 +41,9 @@ function setupBridge() {
       async set(ref, value) {
         values.set(ref, value)
       },
+      async unset(ref) {
+        values.delete(ref)
+      },
     },
   }
   createOAuthBridge(ctx, { server: 'https://reviso.work' })
@@ -64,10 +67,30 @@ function installFetch() {
     }
     if (String(url).endsWith('/oauth/register')) return json(201, { client_id: 'client_1' })
     if (String(url).endsWith('/oauth/token')) {
-      return json(200, { access_token: 'rak_oauth', refresh_token: 'rft_oauth' })
+      const body = String(options.body || '')
+      if (body.includes('grant_type=refresh_token')) {
+        return json(200, {
+          access_token: 'rak_refreshed',
+          refresh_token: 'rft_refreshed',
+          expires_in: 3600,
+        })
+      }
+      return json(200, {
+        access_token: 'rak_oauth',
+        refresh_token: 'rft_oauth',
+        expires_in: 3600,
+      })
+    }
+    if (String(url).endsWith('/api/workspaces')) {
+      return json(200, {
+        workspaces: [{ workspace_id: 'wsp_personal', workspace_type: 'personal' }],
+      })
     }
     if (String(url).endsWith('/api/agent-connection/self')) {
-      return json(200, { connection: { workspace_id: 'wsp_personal' } })
+      return json(200, { connection: { id: 'con_1' } })
+    }
+    if (String(url).includes('/api/agent/connections/con_1/revoke')) {
+      return json(200, { connection: { id: 'con_1', active: false } })
     }
     if (String(url).includes('/api/documents?session_key=dsh:sess_1')) {
       return json(200, { documents: [{ document_id: 'doc_1', title: 'Doc' }] })
@@ -118,6 +141,8 @@ test('runs the OAuth start/callback flow without exposing the token', async () =
     assert.equal(values.get('REVISO_DSH_WORKSPACE_ID'), 'wsp_personal')
     assert.equal(values.get('REVISO_DSH_SERVER'), 'https://reviso.work')
     assert.equal(values.get('REVISO_DSH_REFRESH_TOKEN'), 'rft_oauth')
+    assert.equal(values.get('REVISO_DSH_CONNECTION_ID'), 'con_1')
+    assert.ok(Number(values.get('REVISO_DSH_EXPIRES_AT')) > Date.now())
     assert.doesNotMatch(callbackRes.body, /rak_oauth/)
 
     const tokenCall = fakeFetch.calls.find(call => call.url.endsWith('/oauth/token'))
@@ -152,6 +177,38 @@ test('runs the OAuth start/callback flow without exposing the token', async () =
       reviews: [{ document_id: 'doc_1', title: 'Doc' }],
     })
     assert.doesNotMatch(sessionRes.body + dashboardRes.body, /rak_oauth/)
+
+    const logoutRes = response()
+    await routes.get('/plugins/reviso/auth/logout')(request('/plugins/reviso/auth/logout'), logoutRes)
+    assert.deepEqual(JSON.parse(logoutRes.body), { connected: false })
+    assert.equal(values.size, 0)
+    assert.ok(fakeFetch.calls.some(call => call.url.endsWith('/api/agent/connections/con_1/revoke')))
+  } finally {
+    fakeFetch.restore()
+  }
+})
+
+test('refreshes an expired access token before reading documents', async () => {
+  const { routes, values } = setupBridge()
+  const fakeFetch = installFetch()
+  values.set('REVISO_DSH_TOKEN', 'rak_old')
+  values.set('REVISO_DSH_SERVER', 'https://reviso.work')
+  values.set('REVISO_DSH_WORKSPACE_ID', 'wsp_personal')
+  values.set('REVISO_DSH_REFRESH_TOKEN', 'rft_old')
+  values.set('REVISO_DSH_EXPIRES_AT', '1')
+  values.set('REVISO_DSH_CLIENT_ID', 'client_1')
+  try {
+    const res = response()
+    await routes.get('/plugins/reviso/documents')(
+      request('/plugins/reviso/documents?session_id=sess_1'),
+      res,
+    )
+    assert.equal(res.status, 200)
+    assert.equal(values.get('REVISO_DSH_TOKEN'), 'rak_refreshed')
+    assert.equal(values.get('REVISO_DSH_REFRESH_TOKEN'), 'rft_refreshed')
+    assert.ok(Number(values.get('REVISO_DSH_EXPIRES_AT')) > Date.now())
+    const refreshCall = fakeFetch.calls.find(call => String(call.options.body).includes('grant_type=refresh_token'))
+    assert.ok(refreshCall)
   } finally {
     fakeFetch.restore()
   }
@@ -164,6 +221,21 @@ test('rejects non-loopback hosts', async () => {
     request('/plugins/reviso/auth/status', 'example.com'),
     res,
   )
+  assert.equal(res.status, 403)
+  assert.match(res.body, /loopback_required/)
+})
+
+test('rejects a cross-origin same-site request', async () => {
+  const { routes } = setupBridge()
+  const res = response()
+  await routes.get('/plugins/reviso/auth/status')({
+    url: '/plugins/reviso/auth/status',
+    headers: {
+      host: '127.0.0.1:3080',
+      origin: 'http://127.0.0.1:9999',
+      'sec-fetch-site': 'same-site',
+    },
+  }, res)
   assert.equal(res.status, 403)
   assert.match(res.body, /loopback_required/)
 })

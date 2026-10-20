@@ -117,7 +117,7 @@ function revisoPublishTool(ctx) {
       }
       if (args.parent_id !== undefined && args.parent_id !== '') body.parent_id = args.parent_id
 
-      const response = await postDocument(credential, body, exec?.signal)
+      const response = await postDocument(ctx, credential, body, exec?.signal)
       return {
         document_id: String(response.document_id || ''),
         review_url: String(response.review_url || ''),
@@ -127,7 +127,20 @@ function revisoPublishTool(ctx) {
   }
 }
 
-async function postDocument(credential, body, callerSignal) {
+async function postDocument(ctx, credential, body, callerSignal) {
+  let current = credential
+  let result = await publishAttempt(current, body, callerSignal)
+  if (result.status === 401 && current.refreshToken !== '') {
+    current = await readCredential(ctx, { forceRefresh: true })
+    result = await publishAttempt(current, body, callerSignal)
+  }
+  if (result.status < 200 || result.status >= 300) {
+    throw new Error(`Reviso publish failed (HTTP ${result.status}): ${result.text.slice(0, 300)}`)
+  }
+  return JSON.parse(result.text)
+}
+
+async function publishAttempt(credential, body, callerSignal) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   const signal = callerSignal === undefined
@@ -144,11 +157,7 @@ async function postDocument(credential, body, callerSignal) {
       body: JSON.stringify(body),
       signal,
     })
-    const text = await response.text()
-    if (!response.ok) {
-      throw new Error(`Reviso publish failed (HTTP ${response.status}): ${text.slice(0, 300)}`)
-    }
-    return JSON.parse(text)
+    return { status: response.status, text: await response.text() }
   } finally {
     clearTimeout(timer)
   }

@@ -8,7 +8,9 @@
  */
 import { createHash, randomBytes } from 'node:crypto'
 import {
-  REFRESH_REF, SERVER_REF, TOKEN_REF, WORKSPACE_REF, normalizeServer, readCredential,
+  CLIENT_REF, CONNECTION_REF, EXPIRES_REF, REFRESH_REF, SERVER_REF, TOKEN_REF,
+  WORKSPACE_REF, clearCredential, expiryFrom, normalizeServer, readCredential,
+  resolveConnectionId, resolvePersonalWorkspace, storeCredential,
 } from './credentials.js'
 
 const DEFAULT_SERVER = 'https://reviso.work'
@@ -39,6 +41,11 @@ export function createOAuthBridge(ctx, options = {}) {
     }),
     ctx.webServer.register({
       kind: 'exact',
+      path: '/plugins/reviso/auth/logout',
+      handler: (req, res) => handleLogout(ctx, req, res),
+    }),
+    ctx.webServer.register({
+      kind: 'exact',
       path: '/plugins/reviso/documents',
       handler: (req, res) => handleDocuments(ctx, req, res),
     }),
@@ -57,7 +64,7 @@ async function handleStatus(ctx, req, res) {
   const server = await resolveRef(ctx, SERVER_REF)
   const workspaceId = await resolveRef(ctx, WORKSPACE_REF)
   sendJson(res, 200, {
-    connected: token.configured,
+    connected: token.configured && server !== '' && workspaceId !== '',
     server,
     workspaceId,
   })
@@ -100,8 +107,7 @@ async function handleDashboard(ctx, req, res) {
 async function handleStart(ctx, req, res, defaultServer, pending, clients) {
   if (!isLoopback(req)) return forbidden(res)
   try {
-    const url = new URL(req.url || '', `http://${req.headers.host || '127.0.0.1'}`)
-    const server = normalizeServer(url.searchParams.get('server') || defaultServer)
+    const server = defaultServer
     const origin = `http://${req.headers.host}`
     const redirectUri = `${origin}/plugins/reviso/auth/callback`
     const metadata = await oauthMetadata(server)
@@ -158,32 +164,51 @@ async function handleCallback(ctx, req, res, pending) {
     }, true)
     const access = String(token.access_token || '')
     if (access === '') throw new Error('Reviso token response had no access_token')
-    const workspaceId = await resolveWorkspace(entry.server, access)
+    const workspaceId = await resolvePersonalWorkspace(entry.server, access)
+    const connectionId = await resolveConnectionId(entry.server, access)
+    const refresh = String(token.refresh_token || '')
+    const expiresAt = expiryFrom(token)
 
-    await ctx.credentials.set(TOKEN_REF, access)
-    await ctx.credentials.set(SERVER_REF, entry.server)
-    await ctx.credentials.set(WORKSPACE_REF, workspaceId)
-    if (typeof token.refresh_token === 'string' && token.refresh_token !== '') {
-      await ctx.credentials.set(REFRESH_REF, token.refresh_token)
-    }
+    await storeCredential(ctx, {
+      [TOKEN_REF]: access,
+      [SERVER_REF]: entry.server,
+      [WORKSPACE_REF]: workspaceId,
+      [CLIENT_REF]: entry.clientId,
+      ...(refresh !== '' ? { [REFRESH_REF]: refresh } : {}),
+      ...(expiresAt > 0 ? { [EXPIRES_REF]: String(expiresAt) } : {}),
+      ...(connectionId !== '' ? { [CONNECTION_REF]: connectionId } : {}),
+    })
     renderConnected(res)
   } catch (error) {
     renderError(res, error)
   }
 }
 
-async function resolveWorkspace(server, token) {
-  const response = await fetch(`${server}/api/agent-connection/self`, {
-    headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
-  })
-  const text = await response.text()
-  if (!response.ok) {
-    throw new Error(`Reviso connection check failed (HTTP ${response.status}): ${text.slice(0, 200)}`)
+async function handleLogout(ctx, req, res) {
+  if (!isLoopback(req)) return forbidden(res)
+  try {
+    const token = await resolveRef(ctx, TOKEN_REF)
+    const server = normalizeServer(await resolveRef(ctx, SERVER_REF))
+    const connectionId = await resolveRef(ctx, CONNECTION_REF)
+    if (token !== '' && server !== '' && connectionId !== '') {
+      const response = await fetch(
+        `${server}/api/agent/connections/${encodeURIComponent(connectionId)}/revoke`,
+        {
+          method: 'POST',
+          headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        },
+      )
+      if (!response.ok && response.status !== 404) {
+        const text = await response.text()
+        throw new Error(`Reviso revoke failed (HTTP ${response.status}): ${text.slice(0, 200)}`)
+      }
+    }
+    await clearCredential(ctx)
+    sendJson(res, 200, { connected: false })
+  } catch (error) {
+    sendJson(res, 502, { error: messageOf(error) })
   }
-  const connection = JSON.parse(text)?.connection
-  const workspaceId = String(connection?.workspace_id || connection?.allowed_workspace_ids?.[0] || '')
-  if (workspaceId === '') throw new Error('Reviso connection has no workspace scope')
-  return workspaceId
 }
 
 async function oauthMetadata(server) {
@@ -285,7 +310,15 @@ function isLoopback(req) {
   const hostname = host.startsWith('[') ? host.slice(1, host.indexOf(']')) : host.split(':')[0]
   if (!['127.0.0.1', 'localhost', '::1'].includes(hostname.toLowerCase())) return false
   const site = req.headers['sec-fetch-site']
-  if (site !== undefined && site !== 'same-origin' && site !== 'same-site' && site !== 'none') return false
+  if (site !== undefined && site !== 'same-origin' && site !== 'none') return false
+  const origin = req.headers.origin
+  if (origin !== undefined) {
+    try {
+      if (new URL(String(origin)).host !== host) return false
+    } catch {
+      return false
+    }
+  }
   return true
 }
 

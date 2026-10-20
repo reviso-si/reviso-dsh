@@ -9,6 +9,7 @@ import { apply } from '../index.js'
 let server
 let baseUrl
 let captured = []
+let unauthorizedOnce = false
 
 before(async () => {
   server = http.createServer((req, res) => {
@@ -20,14 +21,38 @@ before(async () => {
         method: req.method,
         url: req.url,
         authorization: req.headers.authorization,
-        body: raw === '' ? null : JSON.parse(raw),
+        body: raw === ''
+          ? null
+          : String(req.headers['content-type'] || '').includes('application/json')
+            ? JSON.parse(raw)
+            : raw,
       })
+      if (req.url === '/oauth/token') {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          access_token: 'rak_refreshed',
+          refresh_token: 'rft_refreshed',
+          expires_in: 3600,
+        }))
+        return
+      }
+      if (req.url === '/api/workspaces') {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ workspaces: [{ workspace_id: 'wsp_cli', workspace_type: 'personal' }] }))
+        return
+      }
       if (req.url === '/api/agent-connection/self') {
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ connection: { workspace_id: 'wsp_cli' } }))
         return
       }
       if (req.url === '/api/documents') {
+        if (unauthorizedOnce) {
+          unauthorizedOnce = false
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'expired' }))
+          return
+        }
         const requestBody = raw === '' ? {} : JSON.parse(raw)
         res.writeHead(201, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({
@@ -71,6 +96,8 @@ function credentialProvider(values) {
     resolve: async ref => values[ref] === undefined
       ? undefined
       : { value: values[ref], source: 'test' },
+    set: async (ref, value) => { values[ref] = value },
+    unset: async ref => { delete values[ref] },
   }
 }
 
@@ -160,7 +187,7 @@ test('falls back to the Reviso CLI OAuth login and resolves the workspace', asyn
     const result = await tool.execute({ title: 'CLI fallback', content: 'Body' }, execContext('sess_cli'))
 
     assert.equal(result.workspace_id, 'wsp_cli')
-    assert.equal(captured[0].url, '/api/agent-connection/self')
+    assert.equal(captured[0].url, '/api/workspaces')
     assert.equal(captured[0].authorization, 'Bearer rak_cli')
     const publish = captured.find(row => row.url === '/api/documents')
     assert.equal(publish.authorization, 'Bearer rak_cli')
@@ -170,6 +197,30 @@ test('falls back to the Reviso CLI OAuth login and resolves the workspace', asyn
     if (saved === undefined) delete process.env.REVISO_DSH_CLI_CREDENTIALS
     else process.env.REVISO_DSH_CLI_CREDENTIALS = saved
     await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('refreshes once after a 401 and retries the publish', async () => {
+  captured = []
+  unauthorizedOnce = true
+  const tool = registerTool(credentialProvider({
+    REVISO_DSH_TOKEN: 'rak_old',
+    REVISO_DSH_WORKSPACE_ID: 'wsp_personal',
+    REVISO_DSH_SERVER: baseUrl,
+    REVISO_DSH_REFRESH_TOKEN: 'rft_old',
+    REVISO_DSH_EXPIRES_AT: String(Date.now() + 3_600_000),
+    REVISO_DSH_CLIENT_ID: 'client_1',
+  }))
+  try {
+    const result = await tool.execute({ title: 'Retry', content: 'Body' }, execContext('sess_retry'))
+    assert.equal(result.document_id, 'doc_123')
+    const publishes = captured.filter(row => row.url === '/api/documents')
+    assert.equal(publishes.length, 2)
+    assert.equal(publishes[0].authorization, 'Bearer rak_old')
+    assert.equal(publishes[1].authorization, 'Bearer rak_refreshed')
+    assert.ok(captured.some(row => row.url === '/oauth/token'))
+  } finally {
+    unauthorizedOnce = false
   }
 })
 
