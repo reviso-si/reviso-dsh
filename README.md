@@ -9,20 +9,15 @@ Reviso for DeepSeek Harness (DSH) — the DSH surface of the Reviso family.
 | `reviso-cli` | CLI |
 | **`reviso-dsh`** | DSH host integration (this repo) |
 
-## Status: Host publish spike; client face still legacy
+## Status: Host-backed Reviso view
 
-The supported publish path is now the Host-owned `reviso_publish` tool below.
-The agent never sees the Reviso token; the tool resolves DSH credential refs
-and binds `source_kind=dsh` plus the calling `session_id`.
-
-The sidebar panel and session tab are still the Phase 1 client-face spike:
-- Sidebar entry (`sidebar.footer.action`, beside Settings) + `shell.overlay` panel.
-- Session view tab (`conversation.view`, id `reviso-dsh.view`).
-
-Those two views still read `server` + `token` from browser `localStorage` and
-fall back to demo data when unconfigured. They are **not** the final credential
-path and will be replaced by the DSH host bridge; do not treat their token form
-as the product login flow.
+The supported path is Host-owned end to end:
+- `reviso_publish` publishes from the agent without exposing the token.
+- The sidebar panel and session tab read through `/plugins/reviso/*`.
+- When unconfigured, both show `连接 Reviso`; the same-origin OAuth bridge
+  stores `REVISO_DSH_*` refs in DSH credentials and resolves the personal
+  workspace. The browser never sees a Reviso token and there is no default
+  mock data.
 
 Slot/build contract: see docs/client-face-contract.md.
 
@@ -43,15 +38,16 @@ REVISO_DSH_WORKSPACE_ID: wsp_...
 REVISO_DSH_SERVER: https://reviso.work
 ```
 
-If you already use Reviso through MCP OAuth, you do not need to create a new
-key. Run the same OAuth login once through the CLI:
+The product path is the `连接 Reviso` button in the DSH panel or session tab.
+For headless verification only, the tool can also reuse a prior CLI OAuth
+login from `~/.config/reviso/credentials.json`:
 
 ```sh
 reviso auth login --server https://reviso.work
 ```
 
-The tool then reads `~/.config/reviso/credentials.json`, resolves the workspace
-from `/api/agent-connection/self`, and reuses that connection.
+The tool then resolves the workspace from `/api/agent-connection/self` and
+reuses that connection.
 
 Contract test: `npm test`.
 

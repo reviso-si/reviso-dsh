@@ -42,7 +42,7 @@ export function apply(ctx: ClientContext): void {
         order: 10,
         store,
         inject: () => ({
-          onReload: (server: string, token: string) => { void loadDocs(engine, server, token) },
+          onReload: () => { void loadDocs(engine) },
         }),
       }, RevisoPanel))
   } catch (err) {

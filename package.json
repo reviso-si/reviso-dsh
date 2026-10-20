@@ -21,7 +21,7 @@
     "url": "https://github.com/reviso-si/reviso-dsh.git"
   },
   "scripts": {
-    "build:client": "tsdown",
+    "build:client": "tsdown && node scripts/wrap-client.mjs",
     "test": "node --test test/*.test.mjs",
     "verify:real": "node scripts/real-publish.mjs"
   },

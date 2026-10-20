@@ -69,6 +69,12 @@ function installFetch() {
     if (String(url).endsWith('/api/agent-connection/self')) {
       return json(200, { connection: { workspace_id: 'wsp_personal' } })
     }
+    if (String(url).includes('/api/documents?session_key=dsh:sess_1')) {
+      return json(200, { documents: [{ document_id: 'doc_1', title: 'Doc' }] })
+    }
+    if (String(url).includes('/api/dashboard/documents?workspace_id=wsp_personal')) {
+      return json(200, { reviews: [{ document_id: 'doc_1', title: 'Doc' }] })
+    }
     return json(404, { error: 'not found' })
   }
   return { calls, restore: () => { globalThis.fetch = saved } }
@@ -122,6 +128,25 @@ test('runs the OAuth start/callback flow without exposing the token', async () =
       workspaceId: 'wsp_personal',
     })
     assert.doesNotMatch(statusRes.body, /rak_oauth/)
+
+    const sessionRes = response()
+    await routes.get('/plugins/reviso/documents')(
+      request('/plugins/reviso/documents?session_id=sess_1'),
+      sessionRes,
+    )
+    assert.deepEqual(JSON.parse(sessionRes.body), {
+      documents: [{ document_id: 'doc_1', title: 'Doc' }],
+    })
+
+    const dashboardRes = response()
+    await routes.get('/plugins/reviso/dashboard')(
+      request('/plugins/reviso/dashboard?limit=20'),
+      dashboardRes,
+    )
+    assert.deepEqual(JSON.parse(dashboardRes.body), {
+      reviews: [{ document_id: 'doc_1', title: 'Doc' }],
+    })
+    assert.doesNotMatch(sessionRes.body + dashboardRes.body, /rak_oauth/)
   } finally {
     fakeFetch.restore()
   }

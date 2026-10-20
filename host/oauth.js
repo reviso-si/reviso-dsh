@@ -7,15 +7,13 @@
  * the popup. Routes are loopback-only, matching the DSH /api trust boundary.
  */
 import { createHash, randomBytes } from 'node:crypto'
+import {
+  REFRESH_REF, SERVER_REF, TOKEN_REF, WORKSPACE_REF, normalizeServer, readCredential,
+} from './credentials.js'
 
 const DEFAULT_SERVER = 'https://reviso.work'
 const PENDING_TTL_MS = 10 * 60 * 1000
 const REQUEST_TIMEOUT_MS = 30_000
-
-const TOKEN_REF = 'REVISO_DSH_TOKEN'
-const WORKSPACE_REF = 'REVISO_DSH_WORKSPACE_ID'
-const SERVER_REF = 'REVISO_DSH_SERVER'
-const REFRESH_REF = 'REVISO_DSH_REFRESH_TOKEN'
 
 export function createOAuthBridge(ctx, options = {}) {
   if (ctx.webServer?.register === undefined) return () => {}
@@ -38,6 +36,16 @@ export function createOAuthBridge(ctx, options = {}) {
       path: '/plugins/reviso/auth/callback',
       handler: (req, res) => handleCallback(ctx, req, res, pending),
     }),
+    ctx.webServer.register({
+      kind: 'exact',
+      path: '/plugins/reviso/documents',
+      handler: (req, res) => handleDocuments(ctx, req, res),
+    }),
+    ctx.webServer.register({
+      kind: 'exact',
+      path: '/plugins/reviso/dashboard',
+      handler: (req, res) => handleDashboard(ctx, req, res),
+    }),
   ]
   return () => { for (const dispose of disposers) dispose() }
 }
@@ -52,6 +60,40 @@ async function handleStatus(ctx, req, res) {
     server,
     workspaceId,
   })
+}
+
+async function handleDocuments(ctx, req, res) {
+  if (!isLoopback(req)) return forbidden(res)
+  try {
+    const url = new URL(req.url || '', `http://${req.headers.host || '127.0.0.1'}`)
+    const sessionId = url.searchParams.get('session_id') || ''
+    if (sessionId === '') throw new Error('session_id required')
+    const credential = await readCredential(ctx)
+    const body = await revisoGet(
+      credential,
+      `/api/documents?session_key=dsh:${encodeURIComponent(sessionId)}`,
+    )
+    sendJson(res, 200, body)
+  } catch (error) {
+    sendJson(res, 502, { error: messageOf(error) })
+  }
+}
+
+async function handleDashboard(ctx, req, res) {
+  if (!isLoopback(req)) return forbidden(res)
+  try {
+    const credential = await readCredential(ctx)
+    const url = new URL(req.url || '', `http://${req.headers.host || '127.0.0.1'}`)
+    const limit = url.searchParams.get('limit') || '50'
+    const body = await revisoGet(
+      credential,
+      `/api/dashboard/documents?workspace_id=${encodeURIComponent(credential.workspaceId)}`
+      + `&limit=${encodeURIComponent(limit)}`,
+    )
+    sendJson(res, 200, body)
+  } catch (error) {
+    sendJson(res, 502, { error: messageOf(error) })
+  }
 }
 
 async function handleStart(ctx, req, res, defaultServer, pending) {
@@ -171,6 +213,24 @@ async function registerClient(metadata, redirectUri) {
   return result.client_id
 }
 
+async function revisoGet(credential, path) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  try {
+    const response = await fetch(`${credential.server}${path}`, {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${credential.token}` },
+      signal: controller.signal,
+    })
+    const text = await response.text()
+    if (!response.ok) {
+      throw new Error(`Reviso read failed (HTTP ${response.status}): ${text.slice(0, 300)}`)
+    }
+    return JSON.parse(text)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 async function oauthJson(url, body, form = false) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
@@ -205,10 +265,6 @@ async function describe(ctx, ref) {
 async function resolveRef(ctx, ref) {
   const resolved = await ctx.credentials.resolve(ref)
   return resolved?.value || ''
-}
-
-function normalizeServer(value) {
-  return String(value).replace(/\/+$/, '')
 }
 
 function challenge(verifier) {
@@ -258,6 +314,10 @@ function renderError(res, error) {
 <p>Reviso connection failed.</p>
 <pre style="white-space:pre-wrap">${escapeHtml(error instanceof Error ? error.message : String(error))}</pre>
 </body>`)
+}
+
+function messageOf(error) {
+  return error instanceof Error ? error.message : String(error)
 }
 
 function escapeHtml(value) {

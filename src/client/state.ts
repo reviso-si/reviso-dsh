@@ -1,18 +1,20 @@
 import { defineStore, type EngineStoreHandle } from '@deepseek-ai/dsh-client-runtime/client'
+import { connectionStatus, dashboardDocuments } from './host.ts'
 
 export interface RevisoDoc {
   id: string
   title: string
-  updated: string
   url: string
+  creator: string
+  updated: string
+  kind: 'document' | 'html_deck' | 'other'
+  unresolved: number
 }
 
-export type RevisoStatus = 'demo' | 'loading' | 'live' | 'error'
+export type RevisoStatus = 'unconfigured' | 'loading' | 'live' | 'error'
 
 export interface RevisoState {
   open: boolean
-  server: string
-  token: string
   status: RevisoStatus
   message: string
   docs: RevisoDoc[]
@@ -21,54 +23,20 @@ export interface RevisoState {
 type RevisoActions = {
   togglePanel: (d: RevisoState) => void
   closePanel: (d: RevisoState) => void
-  setServer: (d: RevisoState, v: string) => void
-  setToken: (d: RevisoState, v: string) => void
   setDocs: (d: RevisoState, status: RevisoStatus, docs: RevisoDoc[], message: string) => void
 }
 
-const LS_SERVER = 'reviso.dsh.server'
-const LS_TOKEN = 'reviso.dsh.token'
-
-function readLS(key: string): string {
-  try { return localStorage.getItem(key) ?? '' } catch { return '' }
-}
-
-function writeLS(key: string, v: string): void {
-  try {
-    if (v === '') localStorage.removeItem(key)
-    else localStorage.setItem(key, v)
-  } catch { /* storage unavailable: settings stay session-only */ }
-}
-
-/** Demo rows, clearly labeled; shown when no credentials are configured or a fetch fails. */
-export function demoDocs(): RevisoDoc[] {
-  return [
-    { id: 'demo-1', title: '（演示）产品需求草稿 v3', updated: '2026-10-20', url: 'https://reviso.work' },
-    { id: 'demo-2', title: '（演示）发布评审清单', updated: '2026-10-21', url: 'https://reviso.work' },
-    { id: 'demo-3', title: '（演示）agent 产出：周报草稿', updated: '2026-10-22', url: 'https://reviso.work' },
-  ]
-}
-
-/**
- * Shared panel state for the footer entry and the overlay panel. One handle is
- * passed to both registers inside apply (root scope; framework caches one live
- * instance per handle x scope).
- */
 export function createRevisoStore(): EngineStoreHandle<RevisoState, RevisoActions> {
   return defineStore({
     init: (): RevisoState => ({
       open: false,
-      server: readLS(LS_SERVER),
-      token: readLS(LS_TOKEN),
-      status: 'demo',
+      status: 'unconfigured',
       message: '',
-      docs: demoDocs(),
+      docs: [],
     }),
     actions: {
       togglePanel: (d) => { d.open = !d.open },
       closePanel: (d) => { d.open = false },
-      setServer: (d, v: string) => { d.server = v; writeLS(LS_SERVER, v) },
-      setToken: (d, v: string) => { d.token = v; writeLS(LS_TOKEN, v) },
       setDocs: (d, status: RevisoStatus, docs: RevisoDoc[], message: string) => {
         d.status = status
         d.docs = docs
@@ -78,55 +46,47 @@ export function createRevisoStore(): EngineStoreHandle<RevisoState, RevisoAction
   })
 }
 
-/** Fetch documents from the configured Reviso deployment; fall back to demo rows. */
-export async function loadDocs(engine: { actions: RevisoActions }, server: string, token: string): Promise<void> {
-  if (server === '' || token === '') {
-    engine.actions.setDocs('demo', demoDocs(), '未配置 Reviso 凭证 —— 显示演示数据。在下方填入 server 与 token 后重试。')
-    return
-  }
+/** Load the personal-workspace dashboard through the Host; no browser token. */
+export async function loadDocs(engine: { actions: RevisoActions }): Promise<void> {
   engine.actions.setDocs('loading', [], '')
   try {
-    const base = server.replace(/\/$/, '')
-    const res = await fetch(`${base}/api/dashboard/documents`, {
-      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const body: unknown = await res.json()
-    const rows = extractDocs(body, base)
-    if (rows.length === 0) throw new Error('响应中没有文档列表')
-    engine.actions.setDocs('live', rows, '')
+    const connection = await connectionStatus()
+    if (!connection.connected) {
+      engine.actions.setDocs('unconfigured', [], '')
+      return
+    }
+    const rows = await dashboardDocuments()
+    engine.actions.setDocs('live', rows.map(row => mapDoc(row, connection.server)), '')
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err)
-    engine.actions.setDocs('demo', demoDocs(), `拉取失败（${reason}）—— 显示演示数据。检查 server/token 与部署端 REVISO_CORS_ALLOWLIST 是否放行本 origin。`)
+    engine.actions.setDocs('error', [], reason)
   }
 }
 
-/** Defensive extraction: accept {documents|items|data|reviews: [...]}, pass through arrays.
- * `reviews` is the dashboard endpoint's legacy row key (server naming vestige);
- * its rows key the doc as `document_id` and carry no URL — build one from base. */
-function extractDocs(body: unknown, base = ''): RevisoDoc[] {
-  const list = Array.isArray(body)
-    ? body
-    : typeof body === 'object' && body !== null
-      ? ((body as Record<string, unknown>).documents
-        ?? (body as Record<string, unknown>).items
-        ?? (body as Record<string, unknown>).data
-        ?? (body as Record<string, unknown>).reviews)
-      : undefined
-  if (!Array.isArray(list)) return []
-  return list.flatMap((row): RevisoDoc[] => {
-    if (typeof row !== 'object' || row === null) return []
-    const r = row as Record<string, unknown>
-    const title = typeof r.title === 'string' ? r.title : ''
-    if (title === '') return []
-    const documentId = typeof r.document_id === 'string' ? r.document_id : ''
-    return [{
-      id: typeof r.id === 'string' ? r.id : documentId || title,
-      title,
-      updated: typeof r.updated_at === 'string' ? r.updated_at.slice(0, 10)
-        : typeof r.updatedAt === 'string' ? r.updatedAt.slice(0, 10) : '',
-      url: typeof r.url === 'string' && r.url !== '' ? r.url
-        : documentId !== '' && base !== '' ? `${base}/reviews/${documentId}` : '',
-    }]
-  })
+function mapDoc(row: {
+  document_id?: string
+  id?: string
+  title: string
+  creator_name?: string
+  updated_at?: string
+  document_kind?: string
+  unresolved_count?: number
+  url?: string
+  review_url?: string
+}, server: string): RevisoDoc {
+  const documentId = row.document_id || row.id || row.title
+  const explicit = row.url || row.review_url || ''
+  return {
+    id: documentId,
+    title: row.title,
+    url: explicit !== ''
+      ? explicit
+      : row.document_id !== undefined ? `${server}/documents/${row.document_id}` : '',
+    creator: row.creator_name || '-',
+    updated: row.updated_at ? row.updated_at.slice(0, 10) : '',
+    kind: row.document_kind === 'html_deck'
+      ? 'html_deck'
+      : row.document_kind === 'document' ? 'document' : 'other',
+    unresolved: typeof row.unresolved_count === 'number' ? row.unresolved_count : 0,
+  }
 }

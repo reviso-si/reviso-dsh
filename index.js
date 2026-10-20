@@ -1,7 +1,5 @@
-import { readFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
 import { createOAuthBridge } from './host/oauth.js'
+import { readCredential } from './host/credentials.js'
 
 /**
  * Host half for reviso-dsh.
@@ -16,9 +14,6 @@ import { createOAuthBridge } from './host/oauth.js'
 export const name = 'reviso-dsh'
 export const inject = ['tools', 'credentials']
 
-const TOKEN_REF = 'REVISO_DSH_TOKEN'
-const WORKSPACE_REF = 'REVISO_DSH_WORKSPACE_ID'
-const SERVER_REF = 'REVISO_DSH_SERVER'
 const REQUEST_TIMEOUT_MS = 30_000
 
 const publishParameters = {
@@ -130,71 +125,6 @@ function revisoPublishTool(ctx) {
       }
     },
   }
-}
-
-async function readCredential(ctx) {
-  const token = await resolveRef(ctx, TOKEN_REF)
-  const server = normalizeServer(await resolveRef(ctx, SERVER_REF))
-  if (token !== '' && server !== '') {
-    const workspaceId = await resolveRef(ctx, WORKSPACE_REF)
-      || await resolveWorkspaceFromConnection(server, token)
-    return { token, workspaceId, server }
-  }
-
-  const cli = await readCliCredential(server)
-  if (cli !== undefined) return cli
-
-  throw new Error(
-    'Reviso is not connected. Run `reviso auth login --server <server>` '
-    + 'or store REVISO_DSH_TOKEN and REVISO_DSH_SERVER before publishing.',
-  )
-}
-
-async function resolveRef(ctx, ref) {
-  const resolved = ctx.credentials?.resolve !== undefined
-    ? await ctx.credentials.resolve(ref)
-    : undefined
-  return String(resolved?.value || process.env[ref] || '')
-}
-
-async function readCliCredential(fallbackServer) {
-  const path = process.env.REVISO_DSH_CLI_CREDENTIALS
-    || join(process.env.REVISO_CONFIG_DIR || join(homedir(), '.config', 'reviso'), 'credentials.json')
-  let document
-  try {
-    document = JSON.parse(await readFile(path, 'utf8'))
-  } catch {
-    return undefined
-  }
-  const server = normalizeServer(fallbackServer || String(document.server || 'https://reviso.work'))
-  const entry = document?.servers?.[server]
-  const token = String(entry?.access_token || '')
-  if (token === '') return undefined
-  const workspaceId = String(entry?.workspace_id || '')
-    || await resolveWorkspaceFromConnection(server, token)
-  return { token, workspaceId, server }
-}
-
-async function resolveWorkspaceFromConnection(server, token) {
-  const response = await fetch(`${normalizeServer(server)}/api/agent-connection/self`, {
-    headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
-  })
-  const text = await response.text()
-  if (!response.ok) {
-    throw new Error(`Reviso connection check failed (HTTP ${response.status}): ${text.slice(0, 300)}`)
-  }
-  const connection = JSON.parse(text)?.connection
-  const workspaceId = String(connection?.workspace_id
-    || connection?.allowed_workspace_ids?.[0]
-    || '')
-  if (workspaceId === '') {
-    throw new Error('Reviso connection has no workspace scope')
-  }
-  return workspaceId
-}
-
-function normalizeServer(value) {
-  return value.replace(/\/+$/, '')
 }
 
 async function postDocument(credential, body, callerSignal) {
