@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { createOAuthBridge } from './host/oauth.js'
 
 /**
  * Host half for reviso-dsh.
@@ -71,6 +72,17 @@ export function apply(ctx) {
     ctx.tools.register(revisoPublishTool(ctx))
   } catch (err) {
     console.warn('[reviso-dsh] host tool registration failed:', err)
+  }
+
+  if (typeof ctx.inject === 'function') {
+    ctx.inject(['webServer'], webCtx => {
+      const register = () => createOAuthBridge(webCtx)
+      if (typeof webCtx.effect === 'function') {
+        webCtx.effect(register, 'reviso-dsh oauth bridge')
+      } else {
+        register()
+      }
+    })
   }
 }
 
