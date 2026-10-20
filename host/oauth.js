@@ -139,7 +139,9 @@ async function handleStart(ctx, req, res, defaultServer, pending, clients) {
 }
 
 async function handleCallback(ctx, req, res, pending) {
-  if (!isLoopback(req)) return forbidden(res)
+  // The provider redirect is a top-level cross-site navigation. Host must stay
+  // loopback; state + PKCE, not Sec-Fetch-Site, authenticate this callback.
+  if (!isLoopback(req, { allowCrossSite: true })) return forbidden(res)
   try {
     const url = new URL(req.url || '', `http://${req.headers.host || '127.0.0.1'}`)
     const state = url.searchParams.get('state') || ''
@@ -320,10 +322,11 @@ function base64url(buffer) {
   return Buffer.from(buffer).toString('base64url')
 }
 
-function isLoopback(req) {
+function isLoopback(req, { allowCrossSite = false } = {}) {
   const host = String(req.headers.host || '')
   const hostname = host.startsWith('[') ? host.slice(1, host.indexOf(']')) : host.split(':')[0]
   if (!['127.0.0.1', 'localhost', '::1'].includes(hostname.toLowerCase())) return false
+  if (allowCrossSite) return true
   const site = req.headers['sec-fetch-site']
   if (site !== undefined && site !== 'same-origin' && site !== 'none') return false
   const origin = req.headers.origin

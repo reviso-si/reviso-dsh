@@ -132,7 +132,14 @@ test('runs the OAuth start/callback flow without exposing the token', async () =
 
     const callbackRes = response()
     await routes.get('/plugins/reviso/auth/callback')(
-      request(`/plugins/reviso/auth/callback?code=code_1&state=${state}`),
+      {
+        url: `/plugins/reviso/auth/callback?code=code_1&state=${state}`,
+        headers: {
+          host: '127.0.0.1:3080',
+          origin: 'https://reviso.work',
+          'sec-fetch-site': 'cross-site',
+        },
+      },
       callbackRes,
     )
     assert.equal(callbackRes.status, 200)
