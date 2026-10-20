@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { RevisoStatus } from './state.ts'
+import { zh, type RevisoLocaleKey } from './locales.ts'
 import {
   connectionStatus, onRevisoConnected, sessionDocuments, startRevisoOAuth,
   type RevisoRow,
@@ -8,6 +9,8 @@ import {
 interface SessionViewProps {
   /** Framework-standard prop for session-scope slots. */
   sessionId: string | undefined
+  /** Locale seat injected by the slot registry. */
+  t?: (key: RevisoLocaleKey) => string
 }
 
 interface SessionDoc {
@@ -20,22 +23,15 @@ interface SessionDoc {
   unresolved: number
 }
 
-const statusLabel: Record<RevisoStatus, string> = {
-  unconfigured: '未连接 Reviso',
-  loading: '加载中…',
-  live: '已连接 Reviso',
-  error: '出错',
-}
-
-function relativeTime(iso: string | undefined, now = Date.now()): string {
+function relativeTime(iso: string | undefined, t: (key: RevisoLocaleKey) => string, now = Date.now()): string {
   if (typeof iso !== 'string' || iso === '') return '-'
   const ts = Date.parse(iso)
   if (!Number.isFinite(ts)) return '-'
   const diff = now - ts
-  if (diff < 60_000) return '刚刚'
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`
-  if (diff < 30 * 86_400_000) return `${Math.floor(diff / 86_400_000)} 天前`
+  if (diff < 60_000) return t('time.now')
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} ${t('time.minutes')}`
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} ${t('time.hours')}`
+  if (diff < 30 * 86_400_000) return `${Math.floor(diff / 86_400_000)} ${t('time.days')}`
   const d = new Date(ts)
   const mm = String(d.getMonth() + 1).padStart(2, '0')
   const dd = String(d.getDate()).padStart(2, '0')
@@ -165,6 +161,7 @@ function EmptyIllustration() {
 export function RevisoSessionView(props: SessionViewProps) {
   ensureStyles()
   const sessionId = props.sessionId ?? ''
+  const t = (key: RevisoLocaleKey): string => props.t?.(key) ?? zh[key]
   const [status, setStatus] = useState<RevisoStatus>('unconfigured')
   const [message, setMessage] = useState('')
   const [docs, setDocs] = useState<SessionDoc[]>([])
@@ -201,15 +198,15 @@ export function RevisoSessionView(props: SessionViewProps) {
   }, [sessionId, reloadKey])
 
   const emptyTitle = status === 'live'
-    ? '还没有文档'
+    ? t('empty.live.title')
     : status === 'error'
-      ? '连接失败'
-      : status === 'loading' ? '正在连接 Reviso' : '连接 Reviso'
+      ? t('empty.error.title')
+      : status === 'loading' ? t('status.loading') : t('empty.unconfigured.title')
   const emptyBody = status === 'live'
-    ? '让 agent 调用 reviso_publish 发布后，这里会按本会话列出来。'
+    ? t('empty.live.body')
     : status === 'error'
-      ? message || '检查 Reviso 连接后重试。'
-      : '登录一次，agent 发布的文档会按本会话自动出现在这里。'
+      ? message || t('empty.error.body')
+      : t('empty.unconfigured.body')
 
   return (
     <div className='rs-session'>
@@ -217,11 +214,11 @@ export function RevisoSessionView(props: SessionViewProps) {
         <div className='rs-session-head'>
           <div>
             <div className='rs-session-title'>Reviso</div>
-            <div className='rs-session-subtitle'>本会话产生的文档</div>
+            <div className='rs-session-subtitle'>{t('subtitle')}</div>
           </div>
           <div className='rs-session-status' data-state={status}>
             <span className='rs-session-dot' aria-hidden />
-            <span>{statusLabel[status]}</span>
+            <span>{t(`status.${status}` as RevisoLocaleKey)}</span>
           </div>
         </div>
         {message !== '' && (
@@ -237,21 +234,22 @@ export function RevisoSessionView(props: SessionViewProps) {
                 <p>{emptyBody}</p>
                 {status !== 'live' && status !== 'loading' && (
                   <button type='button' className='rs-primary' onClick={startRevisoOAuth}>
-                    连接 Reviso
+                    {t('action.connect')}
                   </button>
                 )}
                 {status === 'error' && (
                   <button type='button' className='rs-secondary' onClick={() => setReloadKey(key => key + 1)}>
-                    重试
+                    {t('action.retry')}
                   </button>
                 )}
               </div>
             )
           : (
-              <div className='rs-doc-list' role='list' aria-label='本会话的 Reviso 文档'>
+              <div className='rs-doc-list' role='list' aria-label={t('subtitle')}>
                 {docs.map(doc => {
                   const meta = `${doc.creator} · ${relativeTime(
                     doc.updatedAt === null ? undefined : new Date(doc.updatedAt).toISOString(),
+                    t,
                   )}`
                   const content = (
                     <>
@@ -261,7 +259,7 @@ export function RevisoSessionView(props: SessionViewProps) {
                         <span className='rs-doc-meta'>{meta}</span>
                       </span>
                       {doc.unresolved > 0 && (
-                        <span className='rs-doc-badge'>{doc.unresolved} 待处理</span>
+                        <span className='rs-doc-badge'>{doc.unresolved} {t('doc.pending')}</span>
                       )}
                     </>
                   )

@@ -1,0 +1,48 @@
+/** Reviso tab/panel copy. The key set is shared by both dictionaries. */
+export const zh = {
+  'subtitle': '本会话产生的文档',
+  'status.unconfigured': '未连接 Reviso',
+  'status.loading': '加载中…',
+  'status.live': '已连接 Reviso',
+  'status.error': '出错',
+  'action.connect': '连接 Reviso',
+  'action.retry': '重试',
+  'action.close': '关闭',
+  'empty.live.title': '还没有文档',
+  'empty.live.body': '让 agent 调用 reviso_publish 发布后，这里会按本会话列出来。',
+  'empty.unconfigured.title': '连接 Reviso',
+  'empty.unconfigured.body': '登录一次，agent 发布的文档会按本会话自动出现在这里。',
+  'empty.error.title': '连接失败',
+  'empty.error.body': '检查 Reviso 连接后重试。',
+  'panel.empty': '还没有文档。让 agent 调用 reviso_publish 发布后，这里会出现。',
+  'doc.pending': '待处理',
+  'time.now': '刚刚',
+  'time.minutes': '分钟前',
+  'time.hours': '小时前',
+  'time.days': '天前',
+} as const
+
+export type RevisoLocaleKey = keyof typeof zh
+
+export const en: Record<RevisoLocaleKey, string> = {
+  'subtitle': 'Documents from this session',
+  'status.unconfigured': 'Reviso not connected',
+  'status.loading': 'Loading…',
+  'status.live': 'Reviso connected',
+  'status.error': 'Error',
+  'action.connect': 'Connect Reviso',
+  'action.retry': 'Retry',
+  'action.close': 'Close',
+  'empty.live.title': 'No documents yet',
+  'empty.live.body': 'Ask the agent to call reviso_publish. Documents from this session will appear here.',
+  'empty.unconfigured.title': 'Connect Reviso',
+  'empty.unconfigured.body': 'Sign in once. Documents published by the agent will appear here, bound to this session.',
+  'empty.error.title': 'Connection failed',
+  'empty.error.body': 'Check the Reviso connection and try again.',
+  'panel.empty': 'No documents yet. Ask the agent to call reviso_publish and they will appear here.',
+  'doc.pending': 'pending',
+  'time.now': 'just now',
+  'time.minutes': 'min ago',
+  'time.hours': 'h ago',
+  'time.days': 'd ago',
+}
