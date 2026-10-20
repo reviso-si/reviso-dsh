@@ -13,15 +13,16 @@ function findDshBin() {
   const candidates = [
     process.env.DSH_BIN,
     ...(process.env.PATH || '').split(delimiter).map(dir => join(dir, 'dsh')),
-    '/Users/touchskyer/node_modules/.bin/dsh',
   ]
-  return candidates.find(candidate => candidate !== undefined && existsSync(candidate))
+  const found = candidates.find(candidate => candidate !== undefined && existsSync(candidate))
+  if (found === undefined) {
+    throw new Error('dsh binary not found; set DSH_BIN or add dsh to PATH')
+  }
+  return found
 }
 
 async function loadDshModules() {
-  const dshBin = findDshBin()
-  if (dshBin === undefined) throw new Error('dsh binary not found')
-  const requireFromDsh = createRequire(dshBin)
+  const requireFromDsh = createRequire(findDshBin())
   const [{ Context }, systemPrompt, tools, credentialsLocal] = await Promise.all([
     import(pathToFileURL(requireFromDsh.resolve('@deepseek-ai/cordis')).href),
     import(pathToFileURL(requireFromDsh.resolve('@deepseek-ai/dsh-system-prompt')).href),
@@ -36,14 +37,8 @@ async function loadDshModules() {
   }
 }
 
-test('executes through the real ToolRuntime and credentials provider', async t => {
-  let dsh
-  try {
-    dsh = await loadDshModules()
-  } catch (error) {
-    t.skip(`DSH packages unavailable: ${error.message}`)
-    return
-  }
+test('executes through the real ToolRuntime and credentials provider', async () => {
+  const dsh = await loadDshModules()
 
   const captured = []
   const server = http.createServer((req, res) => {

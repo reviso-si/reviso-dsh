@@ -9,15 +9,20 @@ Reviso for DeepSeek Harness (DSH) — the DSH surface of the Reviso family.
 | `reviso-cli` | CLI |
 | **`reviso-dsh`** | DSH host integration (this repo) |
 
-## Status: Phase 1 — visible client face (verified in a live browser)
+## Status: Host publish spike; client face still legacy
 
-Implemented, two views:
-- Sidebar entry (`sidebar.footer.action`, beside Settings) + `shell.overlay` panel — ALL Reviso documents for the user.
-- Session view tab (`conversation.view`, id `reviso-dsh.view`, beside chat | trajectory) — documents produced by THIS session (binding key `session_key = dsh:<sessionId>`, served once the reviso L0 contract lands).
-Demo mode (labeled 演示) is the default; fill Server + Token in the panel's
-连接设置 to hit a real deployment (auth: `Authorization: Bearer <automation
-key or account-agent token>`; the deployment must allow this origin via
-`REVISO_CORS_ALLOWLIST`).
+The supported publish path is now the Host-owned `reviso_publish` tool below.
+The agent never sees the Reviso token; the tool resolves DSH credential refs
+and binds `source_kind=dsh` plus the calling `session_id`.
+
+The sidebar panel and session tab are still the Phase 1 client-face spike:
+- Sidebar entry (`sidebar.footer.action`, beside Settings) + `shell.overlay` panel.
+- Session view tab (`conversation.view`, id `reviso-dsh.view`).
+
+Those two views still read `server` + `token` from browser `localStorage` and
+fall back to demo data when unconfigured. They are **not** the final credential
+path and will be replaced by the DSH host bridge; do not treat their token form
+as the product login flow.
 
 Slot/build contract: see docs/client-face-contract.md.
 
@@ -39,6 +44,18 @@ REVISO_DSH_SERVER: https://reviso.work
 ```
 
 Contract test: `npm test`.
+
+Real publish verification (requires the three refs above and network access):
+
+```sh
+npm run verify:real
+# optional: -- --credentials <path> --session-id <id> --title <title>
+```
+
+It runs the same ToolRuntime and credentials provider as the Host, publishes
+one document, and reads it back through
+`GET /api/documents?session_key=dsh:<sessionId>`.
+
 
 
 Minimal DSH bundle that loads under the harness. Roadmap:

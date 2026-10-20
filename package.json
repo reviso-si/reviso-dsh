@@ -21,7 +21,8 @@
   },
   "scripts": {
     "build:client": "tsdown",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "verify:real": "node scripts/real-publish.mjs"
   },
   "dsh": {
     "bundle": {

@@ -114,12 +114,12 @@ test('refuses to publish outside an agent session', async () => {
 test('refuses to publish without a connected Reviso credential', async () => {
   const saved = {
     REVISO_DSH_TOKEN: process.env.REVISO_DSH_TOKEN,
-    REVISO_WORKSPACE_ID: process.env.REVISO_WORKSPACE_ID,
-    REVISO_SERVER: process.env.REVISO_SERVER,
+    REVISO_DSH_WORKSPACE_ID: process.env.REVISO_DSH_WORKSPACE_ID,
+    REVISO_DSH_SERVER: process.env.REVISO_DSH_SERVER,
   }
   delete process.env.REVISO_DSH_TOKEN
-  delete process.env.REVISO_WORKSPACE_ID
-  delete process.env.REVISO_SERVER
+  delete process.env.REVISO_DSH_WORKSPACE_ID
+  delete process.env.REVISO_DSH_SERVER
   try {
     const tool = registerTool(credentialProvider({}))
     await assert.rejects(
