@@ -180,7 +180,7 @@ test('runs the OAuth start/callback flow without exposing the token', async () =
 
     const logoutRes = response()
     await routes.get('/plugins/reviso/auth/logout')(request('/plugins/reviso/auth/logout'), logoutRes)
-    assert.deepEqual(JSON.parse(logoutRes.body), { connected: false })
+    assert.deepEqual(JSON.parse(logoutRes.body), { connected: false, remoteRevoked: true })
     assert.equal(values.size, 0)
     assert.ok(fakeFetch.calls.some(call => call.url.endsWith('/api/agent/connections/con_1/revoke')))
   } finally {

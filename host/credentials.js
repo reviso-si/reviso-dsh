@@ -29,6 +29,7 @@ export async function readCredential(ctx, { forceRefresh = false } = {}) {
   let refreshToken = await optionalRef(ctx, REFRESH_REF)
   let clientId = await optionalRef(ctx, CLIENT_REF)
   let expiresAt = Number(await optionalRef(ctx, EXPIRES_REF) || 0)
+  let connectionId = await optionalRef(ctx, CONNECTION_REF)
 
   if (token !== '' && server !== '') {
     if (workspaceId === '') {
@@ -40,11 +41,16 @@ export async function readCredential(ctx, { forceRefresh = false } = {}) {
       token = refreshed.token
       refreshToken = refreshed.refreshToken
       expiresAt = refreshed.expiresAt
+      connectionId = refreshed.connectionId
     }
-    return { token, workspaceId, server, refreshToken, expiresAt, clientId }
+    if (connectionId === '') {
+      connectionId = await resolveConnectionId(server, token)
+      if (connectionId !== '') await ctx.credentials.set(CONNECTION_REF, connectionId)
+    }
+    return { token, workspaceId, server, refreshToken, expiresAt, clientId, connectionId }
   }
 
-  const cli = await readCliCredential(server)
+  const cli = await readCliCredential(ctx, server)
   if (cli !== undefined) return cli
 
   throw new Error(
@@ -68,12 +74,16 @@ export async function refreshCredential(ctx, { server, refreshToken, clientId })
   if (token === '') throw new Error('Reviso refresh response had no access_token')
   const nextRefresh = String(data.refresh_token || refreshToken)
   const expiresAt = expiryFrom(data)
+  const connectionId = String(data.connection?.id || '')
+    || await resolveConnectionId(server, token)
+  if (connectionId === '') throw new Error('Reviso refresh response had no connection id')
   await storeCredential(ctx, {
     [TOKEN_REF]: token,
     [REFRESH_REF]: nextRefresh,
     [EXPIRES_REF]: String(expiresAt),
+    [CONNECTION_REF]: connectionId,
   })
-  return { token, refreshToken: nextRefresh, expiresAt }
+  return { token, refreshToken: nextRefresh, expiresAt, connectionId }
 }
 
 export async function storeCredential(ctx, values) {
@@ -141,7 +151,7 @@ export function expiryFrom(tokenResponse) {
   return seconds > 0 ? Date.now() + seconds * 1000 : 0
 }
 
-async function readCliCredential(fallbackServer) {
+async function readCliCredential(ctx, fallbackServer) {
   const path = process.env.REVISO_DSH_CLI_CREDENTIALS
     || join(process.env.REVISO_CONFIG_DIR || join(homedir(), '.config', 'reviso'), 'credentials.json')
   let document
@@ -152,17 +162,30 @@ async function readCliCredential(fallbackServer) {
   }
   const server = normalizeServer(fallbackServer || String(document.server || DEFAULT_SERVER))
   const entry = document?.servers?.[server]
-  const token = String(entry?.access_token || '')
+  let token = String(entry?.access_token || '')
   if (token === '') return undefined
+  let refreshToken = String(entry?.refresh_token || '')
+  let clientId = String(entry?.client_id || '')
+  let expiresAt = Number(entry?.expires_at || 0)
+  let connectionId = String(entry?.connection_id || '')
+  if (expiresAt > 0 && Date.now() >= expiresAt - REFRESH_SKEW_MS && refreshToken !== '') {
+    const refreshed = await refreshCredential(ctx, { server, refreshToken, clientId })
+    token = refreshed.token
+    refreshToken = refreshed.refreshToken
+    expiresAt = refreshed.expiresAt
+    connectionId = refreshed.connectionId
+  }
   const workspaceId = String(entry?.workspace_id || '')
     || await resolvePersonalWorkspace(server, token)
+  if (connectionId === '') connectionId = await resolveConnectionId(server, token)
   return {
     token,
     workspaceId,
     server,
-    refreshToken: String(entry?.refresh_token || ''),
-    expiresAt: Number(entry?.expires_at || 0),
-    clientId: String(entry?.client_id || ''),
+    refreshToken,
+    expiresAt,
+    clientId,
+    connectionId,
   }
 }
 

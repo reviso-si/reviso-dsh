@@ -43,7 +43,7 @@ before(async () => {
       }
       if (req.url === '/api/agent-connection/self') {
         res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ connection: { workspace_id: 'wsp_cli' } }))
+        res.end(JSON.stringify({ connection: { id: 'con_cli', workspace_id: 'wsp_cli' } }))
         return
       }
       if (req.url === '/api/documents') {
@@ -107,6 +107,7 @@ test('publishes with credential refs and binds the agent session', async () => {
     REVISO_DSH_TOKEN: 'rak_test',
     REVISO_DSH_WORKSPACE_ID: 'wsp_personal',
     REVISO_DSH_SERVER: `${baseUrl}/`,
+    REVISO_DSH_CONNECTION_ID: 'con_test',
   }))
 
   const result = await tool.execute({
@@ -178,7 +179,7 @@ test('falls back to the Reviso CLI OAuth login and resolves the workspace', asyn
   const credentialsPath = join(home, 'credentials.json')
   await writeFile(credentialsPath, JSON.stringify({
     server: baseUrl,
-    servers: { [baseUrl]: { access_token: 'rak_cli' } },
+    servers: { [baseUrl]: { access_token: 'rak_cli', connection_id: 'con_cli' } },
   }))
   const saved = process.env.REVISO_DSH_CLI_CREDENTIALS
   process.env.REVISO_DSH_CLI_CREDENTIALS = credentialsPath
@@ -207,6 +208,7 @@ test('refreshes once after a 401 and retries the publish', async () => {
     REVISO_DSH_TOKEN: 'rak_old',
     REVISO_DSH_WORKSPACE_ID: 'wsp_personal',
     REVISO_DSH_SERVER: baseUrl,
+    REVISO_DSH_CONNECTION_ID: 'con_retry',
     REVISO_DSH_REFRESH_TOKEN: 'rft_old',
     REVISO_DSH_EXPIRES_AT: String(Date.now() + 3_600_000),
     REVISO_DSH_CLIENT_ID: 'client_1',
@@ -229,6 +231,7 @@ test('surfaces a bounded HTTP failure without echoing the token', async () => {
     REVISO_DSH_TOKEN: 'rak_secret',
     REVISO_DSH_WORKSPACE_ID: 'wsp_personal',
     REVISO_DSH_SERVER: baseUrl,
+    REVISO_DSH_CONNECTION_ID: 'con_secret',
   }))
 
   const saved = globalThis.fetch

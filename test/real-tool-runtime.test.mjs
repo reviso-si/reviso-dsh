@@ -69,6 +69,7 @@ test('executes through the real ToolRuntime and credentials provider', async () 
       'REVISO_DSH_TOKEN: rak_real',
       'REVISO_DSH_WORKSPACE_ID: wsp_personal',
       `REVISO_DSH_SERVER: ${baseUrl}`,
+      'REVISO_DSH_CONNECTION_ID: con_real',
       '',
     ].join('\n'), { mode: 0o600 })
 

@@ -76,9 +76,8 @@ async function handleDocuments(ctx, req, res) {
     const url = new URL(req.url || '', `http://${req.headers.host || '127.0.0.1'}`)
     const sessionId = url.searchParams.get('session_id') || ''
     if (sessionId === '') throw new Error('session_id required')
-    const credential = await readCredential(ctx)
-    const body = await revisoGet(
-      credential,
+    const body = await authenticatedGet(
+      ctx,
       `/api/documents?session_key=dsh:${encodeURIComponent(sessionId)}`,
     )
     sendJson(res, 200, body)
@@ -93,8 +92,8 @@ async function handleDashboard(ctx, req, res) {
     const credential = await readCredential(ctx)
     const url = new URL(req.url || '', `http://${req.headers.host || '127.0.0.1'}`)
     const limit = url.searchParams.get('limit') || '50'
-    const body = await revisoGet(
-      credential,
+    const body = await authenticatedGet(
+      ctx,
       `/api/dashboard/documents?workspace_id=${encodeURIComponent(credential.workspaceId)}`
       + `&limit=${encodeURIComponent(limit)}`,
     )
@@ -165,7 +164,9 @@ async function handleCallback(ctx, req, res, pending) {
     const access = String(token.access_token || '')
     if (access === '') throw new Error('Reviso token response had no access_token')
     const workspaceId = await resolvePersonalWorkspace(entry.server, access)
-    const connectionId = await resolveConnectionId(entry.server, access)
+    const connectionId = String(token.connection?.id || '')
+      || await resolveConnectionId(entry.server, access)
+    if (connectionId === '') throw new Error('Reviso token response had no connection id')
     const refresh = String(token.refresh_token || '')
     const expiresAt = expiryFrom(token)
 
@@ -176,7 +177,7 @@ async function handleCallback(ctx, req, res, pending) {
       [CLIENT_REF]: entry.clientId,
       ...(refresh !== '' ? { [REFRESH_REF]: refresh } : {}),
       ...(expiresAt > 0 ? { [EXPIRES_REF]: String(expiresAt) } : {}),
-      ...(connectionId !== '' ? { [CONNECTION_REF]: connectionId } : {}),
+      [CONNECTION_REF]: connectionId,
     })
     renderConnected(res)
   } catch (error) {
@@ -186,29 +187,34 @@ async function handleCallback(ctx, req, res, pending) {
 
 async function handleLogout(ctx, req, res) {
   if (!isLoopback(req)) return forbidden(res)
+  let remoteRevoked = false
+  let message = ''
   try {
-    const token = await resolveRef(ctx, TOKEN_REF)
-    const server = normalizeServer(await resolveRef(ctx, SERVER_REF))
-    const connectionId = await resolveRef(ctx, CONNECTION_REF)
-    if (token !== '' && server !== '' && connectionId !== '') {
-      const response = await fetch(
-        `${server}/api/agent/connections/${encodeURIComponent(connectionId)}/revoke`,
-        {
-          method: 'POST',
-          headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        },
-      )
-      if (!response.ok && response.status !== 404) {
-        const text = await response.text()
-        throw new Error(`Reviso revoke failed (HTTP ${response.status}): ${text.slice(0, 200)}`)
-      }
+    const credential = await readCredential(ctx, { forceRefresh: true })
+    const response = await fetch(
+      `${credential.server}/api/agent/connections/${encodeURIComponent(credential.connectionId)}/revoke`,
+      {
+        method: 'POST',
+        headers: { Accept: 'application/json', Authorization: `Bearer ${credential.token}` },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      },
+    )
+    if (!response.ok && response.status !== 404) {
+      const text = await response.text()
+      message = `remote revoke failed (HTTP ${response.status}): ${text.slice(0, 200)}`
+    } else {
+      remoteRevoked = true
     }
-    await clearCredential(ctx)
-    sendJson(res, 200, { connected: false })
   } catch (error) {
-    sendJson(res, 502, { error: messageOf(error) })
+    message = `remote revoke not verified: ${messageOf(error)}`
+  } finally {
+    await clearCredential(ctx)
   }
+  sendJson(res, 200, {
+    connected: false,
+    remoteRevoked,
+    ...(message === '' ? {} : { message }),
+  })
 }
 
 async function oauthMetadata(server) {
@@ -243,7 +249,20 @@ async function registerClient(metadata, redirectUri, clients) {
   return result.client_id
 }
 
-async function revisoGet(credential, path) {
+async function authenticatedGet(ctx, path) {
+  let credential = await readCredential(ctx)
+  let result = await revisoGetRaw(credential, path)
+  if (result.status === 401 && credential.refreshToken !== '') {
+    credential = await readCredential(ctx, { forceRefresh: true })
+    result = await revisoGetRaw(credential, path)
+  }
+  if (result.status < 200 || result.status >= 300) {
+    throw new Error(`Reviso read failed (HTTP ${result.status}): ${result.text.slice(0, 300)}`)
+  }
+  return JSON.parse(result.text)
+}
+
+async function revisoGetRaw(credential, path) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   try {
@@ -251,11 +270,7 @@ async function revisoGet(credential, path) {
       headers: { Accept: 'application/json', Authorization: `Bearer ${credential.token}` },
       signal: controller.signal,
     })
-    const text = await response.text()
-    if (!response.ok) {
-      throw new Error(`Reviso read failed (HTTP ${response.status}): ${text.slice(0, 300)}`)
-    }
-    return JSON.parse(text)
+    return { status: response.status, text: await response.text() }
   } finally {
     clearTimeout(timer)
   }
