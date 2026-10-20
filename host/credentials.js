@@ -28,20 +28,22 @@ export async function readCredential(ctx, { forceRefresh = false } = {}) {
   let workspaceId = await optionalRef(ctx, WORKSPACE_REF)
   let refreshToken = await optionalRef(ctx, REFRESH_REF)
   let clientId = await optionalRef(ctx, CLIENT_REF)
-  let expiresAt = Number(await optionalRef(ctx, EXPIRES_REF) || 0)
+  let expiresAt = normalizeExpiry(await optionalRef(ctx, EXPIRES_REF))
   let connectionId = await optionalRef(ctx, CONNECTION_REF)
 
   if (token !== '' && server !== '') {
-    if (workspaceId === '') {
-      workspaceId = await resolvePersonalWorkspace(server, token)
-      await ctx.credentials.set(WORKSPACE_REF, workspaceId)
-    }
-    if (forceRefresh || (expiresAt > 0 && Date.now() >= expiresAt - REFRESH_SKEW_MS)) {
+    const shouldRefresh = refreshToken !== ''
+      && (forceRefresh || (expiresAt > 0 && Date.now() >= expiresAt - REFRESH_SKEW_MS))
+    if (shouldRefresh) {
       const refreshed = await refreshCredential(ctx, { server, refreshToken, clientId })
       token = refreshed.token
       refreshToken = refreshed.refreshToken
       expiresAt = refreshed.expiresAt
       connectionId = refreshed.connectionId
+    }
+    if (workspaceId === '') {
+      workspaceId = await resolvePersonalWorkspace(server, token)
+      await ctx.credentials.set(WORKSPACE_REF, workspaceId)
     }
     if (connectionId === '') {
       connectionId = await resolveConnectionId(server, token)
@@ -151,6 +153,13 @@ export function expiryFrom(tokenResponse) {
   return seconds > 0 ? Date.now() + seconds * 1000 : 0
 }
 
+export function normalizeExpiry(value) {
+  const numeric = Number(value || 0)
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0
+  // DSH refs store milliseconds; the Reviso CLI stores epoch seconds.
+  return numeric < 1_000_000_000_000 ? numeric * 1000 : numeric
+}
+
 async function readCliCredential(ctx, fallbackServer) {
   const path = process.env.REVISO_DSH_CLI_CREDENTIALS
     || join(process.env.REVISO_CONFIG_DIR || join(homedir(), '.config', 'reviso'), 'credentials.json')
@@ -166,7 +175,7 @@ async function readCliCredential(ctx, fallbackServer) {
   if (token === '') return undefined
   let refreshToken = String(entry?.refresh_token || '')
   let clientId = String(entry?.client_id || '')
-  let expiresAt = Number(entry?.expires_at || 0)
+  let expiresAt = normalizeExpiry(entry?.expires_at)
   let connectionId = String(entry?.connection_id || '')
   if (expiresAt > 0 && Date.now() >= expiresAt - REFRESH_SKEW_MS && refreshToken !== '') {
     const refreshed = await refreshCredential(ctx, { server, refreshToken, clientId })

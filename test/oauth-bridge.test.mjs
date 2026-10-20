@@ -243,6 +243,29 @@ test('refreshes an expired access token before reading documents', async () => {
   }
 })
 
+test('refreshes before resolving a missing workspace', async () => {
+  const { routes, values } = setupBridge()
+  const fakeFetch = installFetch()
+  values.set('REVISO_DSH_TOKEN', 'rak_old')
+  values.set('REVISO_DSH_SERVER', 'https://reviso.work')
+  values.set('REVISO_DSH_REFRESH_TOKEN', 'rft_old')
+  values.set('REVISO_DSH_EXPIRES_AT', '1')
+  values.set('REVISO_DSH_CLIENT_ID', 'client_1')
+  try {
+    const res = response()
+    await routes.get('/plugins/reviso/documents')(
+      request('/plugins/reviso/documents?session_id=sess_1'),
+      res,
+    )
+    assert.equal(res.status, 200)
+    assert.equal(values.get('REVISO_DSH_WORKSPACE_ID'), 'wsp_personal')
+    const workspaceCall = fakeFetch.calls.find(call => call.url.endsWith('/api/workspaces'))
+    assert.equal(workspaceCall.options.headers.Authorization, 'Bearer rak_refreshed')
+  } finally {
+    fakeFetch.restore()
+  }
+})
+
 test('rejects non-loopback hosts', async () => {
   const { routes } = setupBridge()
   const res = response()

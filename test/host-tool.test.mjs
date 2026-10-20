@@ -201,6 +201,36 @@ test('falls back to the Reviso CLI OAuth login and resolves the workspace', asyn
   }
 })
 
+test('treats the CLI expires_at as epoch seconds and refreshes first', async () => {
+  captured = []
+  const home = await mkdtemp(join(tmpdir(), 'reviso-dsh-cli-expired-'))
+  const credentialsPath = join(home, 'credentials.json')
+  await writeFile(credentialsPath, JSON.stringify({
+    server: baseUrl,
+    servers: {
+      [baseUrl]: {
+        access_token: 'rak_cli_old',
+        refresh_token: 'rft_cli_old',
+        client_id: 'client_cli',
+        expires_at: Math.floor(Date.now() / 1000) - 10,
+      },
+    },
+  }))
+  const saved = process.env.REVISO_DSH_CLI_CREDENTIALS
+  process.env.REVISO_DSH_CLI_CREDENTIALS = credentialsPath
+  try {
+    const tool = registerTool(credentialProvider({}))
+    await tool.execute({ title: 'CLI refresh', content: 'Body' }, execContext('sess_cli_refresh'))
+    assert.ok(captured.some(row => row.url === '/oauth/token'))
+    const publish = captured.find(row => row.url === '/api/documents')
+    assert.equal(publish.authorization, 'Bearer rak_refreshed')
+  } finally {
+    if (saved === undefined) delete process.env.REVISO_DSH_CLI_CREDENTIALS
+    else process.env.REVISO_DSH_CLI_CREDENTIALS = saved
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
 test('refreshes once after a 401 and retries the publish', async () => {
   captured = []
   unauthorizedOnce = true
