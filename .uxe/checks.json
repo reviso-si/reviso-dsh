@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "standard_commands": {
+    "uxe:check": "Run token/drift/static checks for UXE contract compliance.",
+    "uxe:component": "Run component-safe JSX/TSX accessibility and semantics checks.",
+    "uxe:taste": "Run deterministic taste-skill and AI-tell checks.",
+    "uxe:contract": "Run style token consumption and style distinctness checks.",
+    "uxe:page-capability": "Run declared page capability and component grammar fit checks.",
+    "uxe:capture": "Capture screenshot and computed-style evidence for declared UXE surfaces.",
+    "uxe:visual": "Capture screenshot or computed-style evidence for changed surfaces.",
+    "uxe:audit": "Run UXE real-site or app audit plus accessibility checks."
+  },
+  "taste_ai_detector": {
+    "threshold": 85,
+    "forbidden_rules": [
+      "TELL-L14"
+    ]
+  },
+  "fallback_commands": [
+    "python3 .uxe/scripts/check.py --project-root .",
+    "python3 .uxe/scripts/component.py --project-root .",
+    "python3 .uxe/scripts/taste.py --project-root .",
+    "python3 .uxe/scripts/contract.py --project-root .",
+    "python3 .uxe/scripts/page-capability.py --project-root .",
+    "python3 .uxe/scripts/capture.py --project-root .",
+    "python3 .uxe/scripts/visual.py --project-root .",
+    "python3 .uxe/scripts/audit.py --project-root ."
+  ],
+  "required_final_report": [
+    "selected_contract",
+    "affected_surfaces",
+    "affected_tokens",
+    "checks_run",
+    "known_deviations"
+  ],
+  "drift_detection": [
+    "hardcoded_colors_outside_tokens",
+    "hardcoded_font_size_line_height_weight",
+    "undefined_css_vars",
+    "editor_preview_typography_mismatch",
+    "light_dark_token_asymmetry",
+    "backend_frontend_render_mismatch",
+    "surface_mode_mixing_without_contract_note",
+    "contrast_failure",
+    "non_token_line_height",
+    "non_token_font_weight",
+    "component_semantics_failure",
+    "taste_ai_tell",
+    "style_token_not_consumed",
+    "selector_token_binding_missing",
+    "generic_alias_collision",
+    "computed_cascade_mismatch",
+    "style_distinctness_failure",
+    "rendered_style_distinctness_failure",
+    "page_capability_fit_failure",
+    "postprocessor_scope_overreach"
+  ]
+}

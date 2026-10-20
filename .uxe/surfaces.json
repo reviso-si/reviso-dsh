@@ -1,0 +1,210 @@
+{
+  "version": 1,
+  "product_mode": "document-editor",
+  "surfaces": [
+    {
+      "id": "editor",
+      "url": "",
+      "entry": "",
+      "artifact": "",
+      "style_id": "",
+      "layout_grammar": "",
+      "contract_reference": "",
+      "distinct_from": [],
+      "required_token_usage": [],
+      "token_bindings": [],
+      "root_selector": "body",
+      "screenshot_selector": "",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "",
+      "locale": "",
+      "wait_for": "",
+      "auth_state": "",
+      "requires_token_parity": true,
+      "requires_screenshot": true,
+      "requires_computed_style": true
+    },
+    {
+      "id": "read_only_preview",
+      "url": "",
+      "entry": "",
+      "artifact": "",
+      "style_id": "",
+      "layout_grammar": "",
+      "contract_reference": "",
+      "distinct_from": [],
+      "required_token_usage": [],
+      "token_bindings": [],
+      "root_selector": "body",
+      "screenshot_selector": "",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "",
+      "locale": "",
+      "wait_for": "",
+      "auth_state": "",
+      "requires_token_parity": true,
+      "requires_screenshot": true,
+      "requires_computed_style": true
+    },
+    {
+      "id": "sanitized_html_viewer",
+      "url": "",
+      "entry": "",
+      "artifact": "",
+      "style_id": "",
+      "layout_grammar": "",
+      "contract_reference": "",
+      "distinct_from": [],
+      "required_token_usage": [],
+      "token_bindings": [],
+      "root_selector": "body",
+      "screenshot_selector": "",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "",
+      "locale": "",
+      "wait_for": "",
+      "auth_state": "",
+      "requires_token_parity": true,
+      "requires_screenshot": true,
+      "requires_computed_style": true
+    },
+    {
+      "id": "backend_rendered_html",
+      "url": "",
+      "entry": "",
+      "artifact": "",
+      "style_id": "",
+      "layout_grammar": "",
+      "contract_reference": "",
+      "distinct_from": [],
+      "required_token_usage": [],
+      "token_bindings": [],
+      "root_selector": "body",
+      "screenshot_selector": "",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "",
+      "locale": "",
+      "wait_for": "",
+      "auth_state": "",
+      "requires_token_parity": true,
+      "requires_screenshot": true,
+      "requires_computed_style": true
+    },
+    {
+      "id": "history_preview",
+      "url": "",
+      "entry": "",
+      "artifact": "",
+      "style_id": "",
+      "layout_grammar": "",
+      "contract_reference": "",
+      "distinct_from": [],
+      "required_token_usage": [],
+      "token_bindings": [],
+      "root_selector": "body",
+      "screenshot_selector": "",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "",
+      "locale": "",
+      "wait_for": "",
+      "auth_state": "",
+      "requires_token_parity": true,
+      "requires_screenshot": true,
+      "requires_computed_style": true
+    },
+    {
+      "id": "export_static_output",
+      "url": "",
+      "entry": "",
+      "artifact": "",
+      "style_id": "",
+      "layout_grammar": "",
+      "contract_reference": "",
+      "distinct_from": [],
+      "required_token_usage": [],
+      "token_bindings": [],
+      "root_selector": "body",
+      "screenshot_selector": "",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "",
+      "locale": "",
+      "wait_for": "",
+      "auth_state": "",
+      "requires_token_parity": true,
+      "requires_screenshot": true,
+      "requires_computed_style": true
+    }
+  ],
+  "parity_groups": [
+    {
+      "id": "content_rendering",
+      "reference": "read_only_preview",
+      "surfaces": [
+        "editor",
+        "read_only_preview",
+        "sanitized_html_viewer",
+        "backend_rendered_html",
+        "history_preview",
+        "export_static_output"
+      ],
+      "probes": [
+        {
+          "key": "h1",
+          "selector": "h1",
+          "required": "if_present_in_reference"
+        },
+        {
+          "key": "paragraph",
+          "selector": "p",
+          "required": "always"
+        },
+        {
+          "key": "list",
+          "selector": "ul,ol",
+          "required": "if_present_in_reference"
+        },
+        {
+          "key": "code",
+          "selector": "pre,code",
+          "required": "if_present_in_reference"
+        },
+        {
+          "key": "table",
+          "selector": "table",
+          "required": "if_present_in_reference"
+        }
+      ],
+      "compare_styles": [
+        "fontFamily",
+        "fontSize",
+        "lineHeight",
+        "fontWeight",
+        "color",
+        "marginTop",
+        "marginBottom",
+        "backgroundColor",
+        "borderRadius",
+        "boxShadow",
+        "borderColor"
+      ]
+    }
+  ]
+}

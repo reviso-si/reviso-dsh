@@ -23,7 +23,15 @@
   "scripts": {
     "build:client": "tsdown && node scripts/wrap-client.mjs",
     "test": "node --test test/*.test.mjs",
-    "verify:real": "node scripts/real-publish.mjs"
+    "verify:real": "node scripts/real-publish.mjs",
+    "uxe:check": "python3 .uxe/scripts/check.py --project-root .",
+    "uxe:component": "python3 .uxe/scripts/component.py --project-root .",
+    "uxe:taste": "python3 .uxe/scripts/taste.py --project-root .",
+    "uxe:contract": "python3 .uxe/scripts/contract.py --project-root .",
+    "uxe:page-capability": "python3 .uxe/scripts/page-capability.py --project-root .",
+    "uxe:capture": "python3 .uxe/scripts/capture.py --project-root .",
+    "uxe:visual": "python3 .uxe/scripts/visual.py --project-root .",
+    "uxe:audit": "python3 .uxe/scripts/audit.py --project-root ."
   },
   "dsh": {
     "bundle": {

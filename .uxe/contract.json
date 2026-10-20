@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "project": "reviso-dsh",
+  "product_mode": "document-editor",
+  "target_style": "custom",
+  "contract_source": "uxe_project_startup.py",
+  "canonical_style": null,
+  "typography": {
+    "font_family": "system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+    "mono_family": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+    "scale": {
+      "text-xs": {
+        "font_size": "12px",
+        "line_height": "16px",
+        "weight": 400
+      },
+      "text-sm": {
+        "font_size": "14px",
+        "line_height": "20px",
+        "weight": 400
+      },
+      "body": {
+        "font_size": "16px",
+        "line_height": "24px",
+        "weight": 400
+      },
+      "reader": {
+        "font_size": "17px",
+        "line_height": "29px",
+        "weight": 400
+      },
+      "h1": {
+        "font_size": "32px",
+        "line_height": "40px",
+        "weight": 600
+      },
+      "h2": {
+        "font_size": "24px",
+        "line_height": "32px",
+        "weight": 600
+      },
+      "h3": {
+        "font_size": "18px",
+        "line_height": "26px",
+        "weight": 600
+      }
+    }
+  },
+  "theme": {
+    "strategy": "semantic-css-vars",
+    "required_tokens": [
+      "surface",
+      "surface-raised",
+      "text",
+      "text-muted",
+      "accent",
+      "border",
+      "focus-ring"
+    ],
+    "local_aliases": {},
+    "dark_mode": "same-token-slots-required"
+  },
+  "forbidden_drift": [
+    "hardcoded_colors_outside_tokens",
+    "hardcoded_font_size_line_height_weight",
+    "undefined_css_vars",
+    "editor_preview_typography_mismatch",
+    "light_dark_token_asymmetry",
+    "backend_frontend_render_mismatch",
+    "surface_mode_mixing_without_contract_note"
+  ]
+}

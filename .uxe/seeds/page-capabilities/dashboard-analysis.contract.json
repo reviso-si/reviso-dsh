@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "id": "dashboard-analysis",
+  "kind": "page-capability",
+  "minScore": 0.8,
+  "weights": {
+    "metricSummaryRow": 0.25,
+    "primaryAnalysisPanel": 0.5,
+    "secondaryInsights": 0.25
+  },
+  "requiredRegions": [
+    "metric-summary-row",
+    "primary-analysis-panel",
+    "adjacent-ranking-insight",
+    "secondary-insight-grid"
+  ],
+  "chartAnatomy": {
+    "fullChartTypes": ["line", "bar", "area", "doughnut", "radar"],
+    "allowedRenderers": ["chartjs", "echarts", "antv", "d3"],
+    "requiredForRegions": ["primary-analysis-panel"],
+    "minDataPoints": 6,
+    "requires": ["chart-type", "renderer", "series", "labels", "axis-or-grid"]
+  },
+  "antiPatterns": [
+    "generic-four-kpi-plus-isolated-chart",
+    "marker-without-anatomy",
+    "ranking-as-full-table",
+    "primary-chart-without-control-band"
+  ]
+}

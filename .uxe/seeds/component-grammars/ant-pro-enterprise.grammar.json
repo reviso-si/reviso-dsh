@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "id": "ant-pro-enterprise",
+  "kind": "component-grammar",
+  "minScore": 0.75,
+  "signals": {
+    "shell": ["aside", "nav", "header", "breadcrumb"],
+    "cardAnatomy": ["card-header", "card-body", "ant-card-head", "ant-card-body"],
+    "enterpriseDensity": ["card", "table", "chart", "metric", "ranking"],
+    "antiMarketing": ["hero"]
+  },
+  "antiPatterns": [
+    "marketing-hero-as-app-page",
+    "cards-without-head-body-anatomy",
+    "siderless-enterprise-dashboard"
+  ]
+}

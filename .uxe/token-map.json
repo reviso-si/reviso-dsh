@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "css_var_prefix": "--",
+  "required_maps": {
+    "color": [
+      {
+        "canonical": "surface",
+        "css_var": null,
+        "aliases": [
+          "--surface",
+          "--page",
+          "--background",
+          "--bg"
+        ],
+        "status": "missing"
+      },
+      {
+        "canonical": "surface-raised",
+        "css_var": null,
+        "aliases": [
+          "--surface-raised",
+          "--elevated",
+          "--card",
+          "--panel",
+          "--surface-elevated"
+        ],
+        "status": "missing"
+      },
+      {
+        "canonical": "text",
+        "css_var": null,
+        "aliases": [
+          "--text",
+          "--foreground",
+          "--text-primary",
+          "--fg"
+        ],
+        "status": "missing"
+      },
+      {
+        "canonical": "text-muted",
+        "css_var": null,
+        "aliases": [
+          "--text-muted",
+          "--text-secondary",
+          "--muted",
+          "--secondary-text"
+        ],
+        "status": "missing"
+      },
+      {
+        "canonical": "accent",
+        "css_var": null,
+        "aliases": [
+          "--accent",
+          "--primary",
+          "--brand",
+          "--color-primary"
+        ],
+        "status": "missing"
+      },
+      {
+        "canonical": "border",
+        "css_var": null,
+        "aliases": [
+          "--border",
+          "--line",
+          "--stroke"
+        ],
+        "status": "missing"
+      },
+      {
+        "canonical": "focus-ring",
+        "css_var": null,
+        "aliases": [
+          "--focus-ring",
+          "--focus",
+          "--ring",
+          "--focus-color"
+        ],
+        "status": "missing"
+      }
+    ],
+    "typography": [
+      "font-body",
+      "font-mono",
+      "text-body-size",
+      "text-body-line",
+      "reader-size",
+      "reader-line",
+      "heading-weight"
+    ],
+    "spacing": [
+      "space-1",
+      "space-2",
+      "space-3",
+      "space-4",
+      "space-6"
+    ]
+  },
+  "alias_map": {},
+  "missing_tokens": [
+    "surface",
+    "surface-raised",
+    "text",
+    "text-muted",
+    "accent",
+    "border",
+    "focus-ring"
+  ],
+  "discovered_tokens": {},
+  "reject": [
+    "raw_hex_in_component_css",
+    "px_font_size_outside_typography_tokens",
+    "surface_specific_heading_scale"
+  ]
+}
