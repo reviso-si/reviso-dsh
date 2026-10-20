@@ -27,12 +27,6 @@ const statusLabel: Record<RevisoStatus, string> = {
   error: '出错',
 }
 
-const kindLabel: Record<SessionDoc['kind'], string> = {
-  document: '文档',
-  html_deck: '演示',
-  other: '文档',
-}
-
 function relativeTime(iso: string | undefined, now = Date.now()): string {
   if (typeof iso !== 'string' || iso === '') return '-'
   const ts = Date.parse(iso)
@@ -69,29 +63,36 @@ function mapRow(row: RevisoRow, server: string): SessionDoc | null {
 const STYLE_ID = 'reviso-dsh-session-styles'
 
 const CSS = `
-.rs-session{container-type:inline-size;height:100%;overflow:auto;padding:16px 18px;font:13px/1.6 -apple-system,"Segoe UI",system-ui,sans-serif;color:inherit}
-.rs-session-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:2px}
-.rs-session-title{font-size:13px;font-weight:600;letter-spacing:0}
-.rs-session-key{font-size:11px;color:var(--dsw-text-tertiary,#8b949e);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.rs-session-status{display:flex;align-items:center;gap:8px;margin:8px 0 4px;font-size:11px;color:var(--dsw-text-secondary,#57606a)}
-.rs-session-status[data-state="error"]{color:#b35900}
-.rs-session-connect{border:1px solid var(--dsw-border,#d0d7de);background:transparent;color:inherit;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer}
-.rs-session-empty{margin-top:28px;text-align:center;color:var(--dsw-text-tertiary,#8b949e);font-size:12px}
-.rs-file-table{margin-top:10px;border-top:1px solid var(--dsw-border,#d8dee4)}
-.rs-file-row{display:grid;grid-template-columns:minmax(0,2.6fr) minmax(0,.9fr) minmax(0,86px) 52px;align-items:center;gap:12px;min-width:0;min-height:52px;border-bottom:1px solid var(--dsw-border,#d8dee4);padding:0 10px;font-size:13px}
-.rs-file-row-head{min-height:36px;color:var(--dsw-text-tertiary,#8b949e);font-size:12px;font-weight:600}
-.rs-file-row:not(.rs-file-row-head):hover{background:var(--dsw-elevated,#f6f8fa)}
-.rs-file-row>*{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-text-tertiary,#6e7781)}
-.rs-file-name{display:flex;align-items:center;gap:10px;color:inherit}
-.rs-file-name>a{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:inherit;font-weight:500;text-decoration:none}
-.rs-file-name>a:hover{color:var(--dsw-accent,#0969da)}
-.rs-file-icon{display:grid;place-items:center;flex:0 0 22px;width:22px;height:22px;border-radius:5px;background:var(--dsw-file-bg,#ddf4ff);color:var(--dsw-accent,#0969da)}
-.rs-file-icon[data-kind="html_deck"]{background:var(--dsw-deck-bg,#fff1e5);color:#bc4c00}
-.rs-file-meta{font-size:12px}
-.rs-file-pending{color:#bc4c00}
-@container (max-width: 460px){
-  .rs-file-row{grid-template-columns:minmax(0,1fr) 64px;gap:8px}
-  .rs-file-row>.rs-file-creator,.rs-file-row>.rs-file-kind{display:none}
+.rs-session{container-type:inline-size;height:100%;overflow:auto;padding:22px 24px 28px;font:var(--dsw-font-body,13px/1.6 -apple-system,"Segoe UI",system-ui,sans-serif);color:var(--dsw-alias-label-primary,inherit);background:var(--dsw-alias-bg-base,transparent)}
+.rs-session-inner{max-width:860px;margin:0 auto}
+.rs-session-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.rs-session-title{font:var(--dsw-font-title,600 14px/1.4 -apple-system,system-ui,sans-serif);letter-spacing:0;color:var(--dsw-alias-label-primary,inherit)}
+.rs-session-subtitle{margin-top:2px;font:var(--dsw-font-caption,12px/1.5 -apple-system,system-ui,sans-serif);color:var(--dsw-alias-label-tertiary,#8b949e)}
+.rs-session-status{display:flex;align-items:center;gap:8px;font:var(--dsw-font-caption,12px/1.5 -apple-system,system-ui,sans-serif);color:var(--dsw-alias-label-tertiary,#8b949e);white-space:nowrap}
+.rs-session-dot{width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-state-success-primary,#2da44e);flex:0 0 auto}
+.rs-session-status[data-state="error"] .rs-session-dot{background:var(--dsw-alias-state-error-primary,#cf222e)}
+.rs-session-status[data-state="unconfigured"] .rs-session-dot{background:var(--dsw-alias-label-tertiary,#8b949e)}
+.rs-session-connect{border:1px solid var(--dsw-alias-border-l2,#d0d7de);background:var(--dsw-alias-button-elevated-fill,transparent);color:var(--dsw-alias-label-primary,inherit);border-radius:6px;padding:3px 10px;font:inherit;cursor:pointer}
+.rs-session-connect:hover{background:var(--dsw-alias-interactive-bg-hover,#f6f8fa)}
+.rs-session-message{margin-top:12px;padding:10px 12px;border:1px solid var(--dsw-alias-border-l1,#d8dee4);border-radius:8px;font-size:12px;color:var(--dsw-alias-label-secondary,#57606a);background:var(--dsw-alias-bg-module-platform,transparent)}
+.rs-session-message[data-state="error"]{border-color:var(--dsw-alias-state-error-secondary,#cf222e);color:var(--dsw-alias-state-error-primary,#cf222e)}
+.rs-session-empty{margin-top:56px;text-align:center;color:var(--dsw-alias-label-tertiary,#8b949e);font-size:12px;line-height:1.7}
+.rs-session-empty strong{display:block;margin-bottom:4px;color:var(--dsw-alias-label-secondary,#57606a);font-weight:500}
+.rs-doc-list{margin-top:16px;display:flex;flex-direction:column;gap:2px}
+.rs-doc{display:flex;align-items:flex-start;gap:12px;padding:10px 10px;border-radius:8px;text-decoration:none;color:inherit;min-width:0}
+.rs-doc:hover{background:var(--dsw-alias-interactive-bg-hover,#f6f8fa)}
+.rs-doc-icon{display:grid;place-items:center;flex:0 0 26px;width:26px;height:26px;margin-top:1px;border-radius:6px;background:var(--dsw-alias-bg-module-platform,#eaeef2);color:var(--dsw-alias-label-secondary,#57606a)}
+.rs-doc-icon[data-kind="html_deck"]{color:var(--dsw-alias-state-business-primary,#0969da)}
+.rs-doc-main{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.rs-doc-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-primary,inherit);font-weight:500}
+.rs-doc:hover .rs-doc-title{color:var(--dsw-alias-state-business-primary,#0969da)}
+.rs-doc-meta{font:var(--dsw-font-caption,12px/1.5 -apple-system,system-ui,sans-serif);color:var(--dsw-alias-label-tertiary,#8b949e);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rs-doc-badge{flex:0 0 auto;margin-top:1px;padding:1px 7px;border-radius:999px;background:var(--dsw-alias-state-business-tertiary,rgba(9,105,218,.1));color:var(--dsw-alias-state-business-primary,#0969da);font:var(--dsw-font-caption,11px/1.6 -apple-system,system-ui,sans-serif);font-weight:500}
+@container (max-width: 520px){
+  .rs-session{padding:18px 16px 24px}
+  .rs-doc{padding:10px 6px}
+  .rs-doc-meta{white-space:normal}
+  .rs-session-status{white-space:normal;text-align:right}
 }
 `
 
@@ -109,7 +110,7 @@ function FileIcon({ kind }: { kind: SessionDoc['kind'] }) {
     ? 'M3 3h8l2 2v14l-2-2H3V3zm10 2h5v13l-2.5-2L13 18V5z'
     : 'M5 2h8l4 4v16H5V2zm8 1v3h3l-3-3zM7 9h8v1.5H7V9zm0 3h8v1.5H7V12zm0 3h6v1.5H7V12z'
   return (
-    <span className='rs-file-icon' data-kind={kind} aria-hidden>
+    <span className='rs-doc-icon' data-kind={kind} aria-hidden>
       <svg width='13' height='13' viewBox='0 0 24 24' fill='currentColor'>
         <path d={path} />
       </svg>
@@ -161,51 +162,66 @@ export function RevisoSessionView(props: SessionViewProps) {
 
   return (
     <div className='rs-session'>
-      <div className='rs-session-head'>
-        <span className='rs-session-title'>本会话产生的 Reviso 文档</span>
-        <span
-          className='rs-session-key'
-          title={sessionId === '' ? undefined : `session_key: dsh:${sessionId}`}
-        >
-          {sessionId === '' ? '' : `dsh:${sessionId}`}
-        </span>
-      </div>
-      {status !== 'live' && (
-        <div className='rs-session-status' data-state={status === 'error' ? 'error' : undefined}>
-          <span>{statusLabel[status]}{message === '' ? '' : ` — ${message}`}</span>
-          <button type='button' className='rs-session-connect' onClick={startRevisoOAuth}>
-            连接 Reviso
-          </button>
-        </div>
-      )}
-      {docs.length === 0 && status === 'live'
-        ? <div className='rs-session-empty'>本会话还没有产出 Reviso 文档。让 agent 调用 reviso_publish 发布。</div>
-        : docs.length === 0
-          ? null
-          : (
-              <div className='rs-file-table' role='list' aria-label='本会话的 Reviso 文档'>
-                <div className='rs-file-row rs-file-row-head' role='listitem'>
-                  <span>名称</span><span className='rs-file-creator'>创建者</span><span>更新时间</span><span className='rs-file-kind'>类型</span>
-                </div>
-                {docs.map(doc => (
-                  <div className='rs-file-row' role='listitem' key={doc.id}>
-                    <span className='rs-file-name'>
-                      <FileIcon kind={doc.kind} />
-                      {doc.url === ''
-                        ? <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{doc.title}</span>
-                        : <a href={doc.url} target='_blank' rel='noreferrer'>{doc.title}</a>}
-                    </span>
-                    <span className='rs-file-creator'>{doc.creator}</span>
-                    <span className='rs-file-meta'>
-                      {doc.unresolved > 0
-                        ? <span className='rs-file-pending'>{doc.unresolved} 条待处理</span>
-                        : relativeTime(doc.updatedAt === null ? undefined : new Date(doc.updatedAt).toISOString())}
-                    </span>
-                    <span className='rs-file-kind'>{kindLabel[doc.kind]}</span>
-                  </div>
-                ))}
-              </div>
+      <div className='rs-session-inner'>
+        <div className='rs-session-head'>
+          <div>
+            <div className='rs-session-title'>Reviso</div>
+            <div className='rs-session-subtitle'>本会话产生的文档</div>
+          </div>
+          <div className='rs-session-status' data-state={status}>
+            <span className='rs-session-dot' aria-hidden />
+            <span>{statusLabel[status]}</span>
+            {status !== 'live' && (
+              <button type='button' className='rs-session-connect' onClick={startRevisoOAuth}>
+                连接 Reviso
+              </button>
             )}
+          </div>
+        </div>
+        {message !== '' && (
+          <div className='rs-session-message' data-state={status === 'error' ? 'error' : undefined}>
+            {message}
+          </div>
+        )}
+        {docs.length === 0 && status === 'live'
+          ? (
+              <div className='rs-session-empty'>
+                <strong>还没有文档</strong>
+                让 agent 调用 reviso_publish 发布后，这里会按本会话列出来。
+              </div>
+            )
+          : docs.length === 0
+            ? null
+            : (
+                <div className='rs-doc-list' role='list' aria-label='本会话的 Reviso 文档'>
+                  {docs.map(doc => {
+                    const meta = `${doc.creator} · ${relativeTime(
+                      doc.updatedAt === null ? undefined : new Date(doc.updatedAt).toISOString(),
+                    )}`
+                    const content = (
+                      <>
+                        <FileIcon kind={doc.kind} />
+                        <span className='rs-doc-main'>
+                          <span className='rs-doc-title'>{doc.title}</span>
+                          <span className='rs-doc-meta'>{meta}</span>
+                        </span>
+                        {doc.unresolved > 0 && (
+                          <span className='rs-doc-badge'>{doc.unresolved} 待处理</span>
+                        )}
+                      </>
+                    )
+                    return doc.url === ''
+                      ? <div className='rs-doc' role='listitem' key={doc.id}>{content}</div>
+                      : (
+                          <a className='rs-doc' role='listitem' key={doc.id}
+                            href={doc.url} target='_blank' rel='noreferrer'>
+                            {content}
+                          </a>
+                        )
+                  })}
+                </div>
+              )}
+      </div>
     </div>
   )
 }
