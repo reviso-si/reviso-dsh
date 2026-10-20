@@ -2,11 +2,13 @@
 /**
  * Real Reviso publish verification for the Host-owned tool.
  *
- * Requires real REVISO_DSH_* refs in $DSH_HOME/.credentials.yaml (or --credentials).
- * Runs the same ToolRuntime + credentials provider the Host uses, publishes one
- * document, then reads it back through the session-key endpoint.
+ * Requires either real REVISO_DSH_* refs in $DSH_HOME/.credentials.yaml
+ * (or --credentials) or a prior `reviso auth login`. Runs the same ToolRuntime
+ * + credentials provider the Host uses, publishes one document, then reads it
+ * back through the session-key endpoint.
  */
 import { existsSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
@@ -25,7 +27,7 @@ const { values } = parseArgs({
 const credentialsPath = resolve(
   values.credentials || join(process.env.DSH_HOME || join(homedir(), '.dsh'), '.credentials.yaml'),
 )
-if (!existsSync(credentialsPath)) {
+if (values.credentials !== undefined && !existsSync(credentialsPath)) {
   fail(`credentials file not found: ${credentialsPath}`)
 }
 
@@ -38,9 +40,13 @@ await ctx.plugin(dsh.SystemPrompt)
 await ctx.plugin(dsh.ToolRuntime)
 await ctx.plugin(dsh.LocalCredentialProvider, { path: credentialsPath, watch: false })
 
-const server = await resolveRef('REVISO_DSH_SERVER')
-const workspaceId = await resolveRef('REVISO_DSH_WORKSPACE_ID')
-const token = await resolveRef('REVISO_DSH_TOKEN')
+const cli = await readCliCredentials()
+const server = await optionalRef('REVISO_DSH_SERVER') || cli.server || 'https://reviso.work'
+const token = await optionalRef('REVISO_DSH_TOKEN') || cli.token
+if (token === '') {
+  fail('no Reviso credential. Run `reviso auth login --server https://reviso.work` '
+    + 'or store REVISO_DSH_TOKEN and REVISO_DSH_SERVER.')
+}
 
 apply({ tools: ctx.tools, credentials: ctx.credentials })
 
@@ -67,7 +73,7 @@ if (result.isError) {
 const document = result.value
 console.log(JSON.stringify({
   sessionId,
-  workspaceId,
+  workspaceId: document.workspace_id,
   documentId: document.document_id,
   reviewUrl: document.review_url,
 }, null, 2))
@@ -85,12 +91,22 @@ const found = Array.isArray(rows) && rows.some(row => row.document_id === docume
 if (!found) fail(`published document ${document.document_id} was not found in session_key=dsh:${sessionId}`)
 console.log(`session readback: found ${document.document_id}`)
 
-async function resolveRef(ref) {
+async function optionalRef(ref) {
   const resolved = await ctx.credentials.resolve(ref)
-  if (resolved === undefined || resolved.value === '') {
-    fail(`credential ref missing: ${ref} (expected in ${credentialsPath})`)
+  return resolved?.value || ''
+}
+
+async function readCliCredentials() {
+  const path = process.env.REVISO_DSH_CLI_CREDENTIALS
+    || join(process.env.REVISO_CONFIG_DIR || join(homedir(), '.config', 'reviso'), 'credentials.json')
+  try {
+    const document = JSON.parse(await readFile(path, 'utf8'))
+    const server = String(document.server || 'https://reviso.work').replace(/\/+$/, '')
+    const entry = document?.servers?.[server]
+    return { server, token: String(entry?.access_token || '') }
+  } catch {
+    return { server: '', token: '' }
   }
-  return resolved.value
 }
 
 async function loadDshModules() {

@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import http from 'node:http'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import { apply } from '../index.js'
 
@@ -19,12 +22,18 @@ before(async () => {
         authorization: req.headers.authorization,
         body: raw === '' ? null : JSON.parse(raw),
       })
+      if (req.url === '/api/agent-connection/self') {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ connection: { workspace_id: 'wsp_cli' } }))
+        return
+      }
       if (req.url === '/api/documents') {
+        const requestBody = raw === '' ? {} : JSON.parse(raw)
         res.writeHead(201, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({
           document_id: 'doc_123',
           review_url: '/documents/doc_123',
-          workspace_id: 'wsp_personal',
+          workspace_id: requestBody.workspace_id || 'wsp_personal',
         }))
         return
       }
@@ -116,10 +125,12 @@ test('refuses to publish without a connected Reviso credential', async () => {
     REVISO_DSH_TOKEN: process.env.REVISO_DSH_TOKEN,
     REVISO_DSH_WORKSPACE_ID: process.env.REVISO_DSH_WORKSPACE_ID,
     REVISO_DSH_SERVER: process.env.REVISO_DSH_SERVER,
+    REVISO_DSH_CLI_CREDENTIALS: process.env.REVISO_DSH_CLI_CREDENTIALS,
   }
   delete process.env.REVISO_DSH_TOKEN
   delete process.env.REVISO_DSH_WORKSPACE_ID
   delete process.env.REVISO_DSH_SERVER
+  process.env.REVISO_DSH_CLI_CREDENTIALS = join(tmpdir(), 'missing-reviso-dsh-credential.json')
   try {
     const tool = registerTool(credentialProvider({}))
     await assert.rejects(
@@ -131,6 +142,34 @@ test('refuses to publish without a connected Reviso credential', async () => {
       if (value === undefined) delete process.env[key]
       else process.env[key] = value
     }
+  }
+})
+
+test('falls back to the Reviso CLI OAuth login and resolves the workspace', async () => {
+  captured = []
+  const home = await mkdtemp(join(tmpdir(), 'reviso-dsh-cli-'))
+  const credentialsPath = join(home, 'credentials.json')
+  await writeFile(credentialsPath, JSON.stringify({
+    server: baseUrl,
+    servers: { [baseUrl]: { access_token: 'rak_cli' } },
+  }))
+  const saved = process.env.REVISO_DSH_CLI_CREDENTIALS
+  process.env.REVISO_DSH_CLI_CREDENTIALS = credentialsPath
+  try {
+    const tool = registerTool(credentialProvider({}))
+    const result = await tool.execute({ title: 'CLI fallback', content: 'Body' }, execContext('sess_cli'))
+
+    assert.equal(result.workspace_id, 'wsp_cli')
+    assert.equal(captured[0].url, '/api/agent-connection/self')
+    assert.equal(captured[0].authorization, 'Bearer rak_cli')
+    const publish = captured.find(row => row.url === '/api/documents')
+    assert.equal(publish.authorization, 'Bearer rak_cli')
+    assert.equal(publish.body.workspace_id, 'wsp_cli')
+    assert.equal(publish.body.source_session_id, 'sess_cli')
+  } finally {
+    if (saved === undefined) delete process.env.REVISO_DSH_CLI_CREDENTIALS
+    else process.env.REVISO_DSH_CLI_CREDENTIALS = saved
+    await rm(home, { recursive: true, force: true })
   }
 })
 

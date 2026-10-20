@@ -43,6 +43,16 @@ REVISO_DSH_WORKSPACE_ID: wsp_...
 REVISO_DSH_SERVER: https://reviso.work
 ```
 
+If you already use Reviso through MCP OAuth, you do not need to create a new
+key. Run the same OAuth login once through the CLI:
+
+```sh
+reviso auth login --server https://reviso.work
+```
+
+The tool then reads `~/.config/reviso/credentials.json`, resolves the workspace
+from `/api/agent-connection/self`, and reuses that connection.
+
 Contract test: `npm test`.
 
 Real publish verification (requires the three refs above and network access):
