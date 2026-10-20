@@ -24,22 +24,18 @@ Slot/build contract: see docs/client-face-contract.md.
 ## Host-owned publish tool (spike)
 
 `index.js` registers `reviso_publish` on the DSH Host. The agent passes title
-and content; the tool resolves the DSH credential record `REVISO_DSH`,
-reads the calling session id from `exec.agent.session.header.id`, and posts to
-Reviso with `source_kind=dsh` plus `source_session_id`. The token never enters
-the browser or an agent child process.
+and content; the tool resolves three DSH credential refs, reads the calling
+session id from `exec.agent.session.header.id`, and posts to Reviso with
+`source_kind=dsh` plus `source_session_id`. The token never enters the browser
+or an agent child process.
 
-Credential record shape (`$DSH_HOME/.credentials.yaml`):
+Installed DSH credentials are a flat mapping of POSIX refs to strings
+(`$DSH_HOME/.credentials.yaml`):
 
 ```yaml
-version: 1
-records:
-  REVISO_DSH:
-    kind: grant
-    payload:
-      token: rak_...
-      workspaceId: wsp_...
-      server: https://reviso.work
+REVISO_DSH_TOKEN: rak_...
+REVISO_DSH_WORKSPACE_ID: wsp_...
+REVISO_DSH_SERVER: https://reviso.work
 ```
 
 Contract test: `npm test`.

@@ -57,16 +57,21 @@ function execContext(sessionId = 'sess_123') {
   }
 }
 
-test('publishes with the credential record and binds the agent session', async () => {
+function credentialProvider(values) {
+  return {
+    resolve: async ref => values[ref] === undefined
+      ? undefined
+      : { value: values[ref], source: 'test' },
+  }
+}
+
+test('publishes with credential refs and binds the agent session', async () => {
   captured = []
-  const tool = registerTool({
-    readRecord: async key => key === 'REVISO_DSH'
-      ? {
-          kind: 'grant',
-          payload: { token: 'rak_test', workspaceId: 'wsp_personal', server: `${baseUrl}/` },
-        }
-      : undefined,
-  })
+  const tool = registerTool(credentialProvider({
+    REVISO_DSH_TOKEN: 'rak_test',
+    REVISO_DSH_WORKSPACE_ID: 'wsp_personal',
+    REVISO_DSH_SERVER: `${baseUrl}/`,
+  }))
 
   const result = await tool.execute({
     title: 'Session plan',
@@ -94,12 +99,11 @@ test('publishes with the credential record and binds the agent session', async (
 })
 
 test('refuses to publish outside an agent session', async () => {
-  const tool = registerTool({
-    readRecord: async () => ({
-      kind: 'grant',
-      payload: { token: 'rak_test', workspaceId: 'wsp_personal', server: baseUrl },
-    }),
-  })
+  const tool = registerTool(credentialProvider({
+    REVISO_DSH_TOKEN: 'rak_test',
+    REVISO_DSH_WORKSPACE_ID: 'wsp_personal',
+    REVISO_DSH_SERVER: baseUrl,
+  }))
 
   await assert.rejects(
     () => tool.execute({ title: 'T', content: 'C' }, { signal: new AbortController().signal }),
@@ -117,10 +121,7 @@ test('refuses to publish without a connected Reviso credential', async () => {
   delete process.env.REVISO_WORKSPACE_ID
   delete process.env.REVISO_SERVER
   try {
-    const tool = registerTool({
-      readRecord: async () => undefined,
-      resolve: async () => undefined,
-    })
+    const tool = registerTool(credentialProvider({}))
     await assert.rejects(
       () => tool.execute({ title: 'T', content: 'C' }, execContext()),
       /Reviso is not connected/,
@@ -134,12 +135,11 @@ test('refuses to publish without a connected Reviso credential', async () => {
 })
 
 test('surfaces a bounded HTTP failure without echoing the token', async () => {
-  const tool = registerTool({
-    readRecord: async () => ({
-      kind: 'grant',
-      payload: { token: 'rak_secret', workspaceId: 'wsp_personal', server: baseUrl },
-    }),
-  })
+  const tool = registerTool(credentialProvider({
+    REVISO_DSH_TOKEN: 'rak_secret',
+    REVISO_DSH_WORKSPACE_ID: 'wsp_personal',
+    REVISO_DSH_SERVER: baseUrl,
+  }))
 
   const saved = globalThis.fetch
   globalThis.fetch = async () => new Response('nope', { status: 503 })

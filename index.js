@@ -10,8 +10,9 @@
 export const name = 'reviso-dsh'
 export const inject = ['tools', 'credentials']
 
-const CREDENTIAL_RECORD = 'REVISO_DSH'
-const CREDENTIAL_REF = 'REVISO_DSH_TOKEN'
+const TOKEN_REF = 'REVISO_DSH_TOKEN'
+const WORKSPACE_REF = 'REVISO_DSH_WORKSPACE_ID'
+const SERVER_REF = 'REVISO_DSH_SERVER'
 const REQUEST_TIMEOUT_MS = 30_000
 
 const publishParameters = {
@@ -115,31 +116,23 @@ function revisoPublishTool(ctx) {
 }
 
 async function readCredential(ctx) {
-  if (ctx.credentials?.readRecord !== undefined) {
-    const record = await ctx.credentials.readRecord(CREDENTIAL_RECORD)
-    const payload = record?.payload
-    if (payload?.token && payload?.workspaceId && payload?.server) {
-      return {
-        token: String(payload.token),
-        workspaceId: String(payload.workspaceId),
-        server: normalizeServer(String(payload.server)),
-      }
-    }
-  }
-
-  const resolved = ctx.credentials?.resolve !== undefined
-    ? await ctx.credentials.resolve(CREDENTIAL_REF)
-    : undefined
-  const token = String(resolved?.value || process.env[CREDENTIAL_REF] || '')
-  const workspaceId = String(process.env.REVISO_WORKSPACE_ID || '')
-  const server = normalizeServer(String(process.env.REVISO_SERVER || ''))
+  const token = await resolveRef(ctx, TOKEN_REF)
+  const workspaceId = await resolveRef(ctx, WORKSPACE_REF)
+  const server = normalizeServer(await resolveRef(ctx, SERVER_REF))
   if (token === '' || workspaceId === '' || server === '') {
     throw new Error(
-      'Reviso is not connected. Store a REVISO_DSH credential record with '
-      + 'token, workspaceId, and server before publishing.',
+      'Reviso is not connected. Store REVISO_DSH_TOKEN, '
+      + 'REVISO_DSH_WORKSPACE_ID, and REVISO_DSH_SERVER before publishing.',
     )
   }
   return { token, workspaceId, server }
+}
+
+async function resolveRef(ctx, ref) {
+  const resolved = ctx.credentials?.resolve !== undefined
+    ? await ctx.credentials.resolve(ref)
+    : undefined
+  return String(resolved?.value || process.env[ref] || '')
 }
 
 function normalizeServer(value) {
