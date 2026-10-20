@@ -18,6 +18,17 @@ export interface RevisoRow {
   lifecycle_status?: string
 }
 
+export interface RevisoDocumentContent {
+  document_id: string
+  source_format: string
+  document_kind?: string
+  content: string
+  content_html?: string
+  version_id: string
+  version_no: number
+  updated_at?: string
+}
+
 export async function connectionStatus(): Promise<RevisoConnectionStatus> {
   const res = await fetch('/plugins/reviso/auth/status', { headers: { Accept: 'application/json' } })
   if (!res.ok) throw new Error(`status HTTP ${res.status}`)
@@ -40,6 +51,14 @@ export async function sessionDocuments(sessionId: string): Promise<RevisoRow[]> 
   if (!res.ok) throw new Error(`documents HTTP ${res.status}`)
   const body = await res.json() as { documents?: RevisoRow[] }
   return Array.isArray(body.documents) ? body.documents : []
+}
+
+export async function documentContent(documentId: string): Promise<RevisoDocumentContent> {
+  const res = await fetch(`/plugins/reviso/document?id=${encodeURIComponent(documentId)}`, {
+    headers: { Accept: 'application/json' },
+  })
+  if (!res.ok) throw new Error(`document HTTP ${res.status}`)
+  return await res.json() as RevisoDocumentContent
 }
 
 export function startRevisoOAuth(): void {

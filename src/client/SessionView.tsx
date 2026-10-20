@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import type { RevisoStatus } from './state.ts'
 import { zh, type RevisoLocaleKey } from './locales.ts'
 import {
-  connectionStatus, onRevisoConnected, sessionDocuments, startRevisoOAuth,
-  type RevisoRow,
+  connectionStatus, documentContent, onRevisoConnected, sessionDocuments, startRevisoOAuth,
+  type RevisoDocumentContent, type RevisoRow,
 } from './host.ts'
 
 interface SessionViewProps {
@@ -83,7 +83,7 @@ const CSS = `
 .rs-session-empty p{max-width:440px;margin:0;color:var(--dsw-alias-label-secondary,#57606a);font-size:13px;line-height:1.6}
 .rs-session-empty .rs-primary{margin-top:4px}
 .rs-doc-list{margin-top:16px;display:flex;flex-direction:column;gap:2px}
-.rs-doc{display:flex;align-items:flex-start;gap:12px;padding:10px 10px;border-radius:8px;text-decoration:none;color:inherit;min-width:0}
+.rs-doc{display:flex;align-items:flex-start;gap:12px;padding:10px 10px;border:0;border-radius:8px;background:transparent;text-align:left;text-decoration:none;color:inherit;min-width:0;width:100%;font:inherit;cursor:pointer}
 .rs-doc:hover{background:var(--dsw-alias-interactive-bg-hover,#f6f8fa)}
 .rs-doc-icon{display:grid;place-items:center;flex:0 0 26px;width:26px;height:26px;margin-top:1px;border-radius:6px;background:var(--rs-accent-tint);color:var(--rs-accent)}
 .rs-doc-icon[data-kind="html_deck"]{color:#d97706;background:rgba(217,119,6,.12)}
@@ -92,6 +92,22 @@ const CSS = `
 .rs-doc:hover .rs-doc-title{color:var(--rs-accent)}
 .rs-doc-meta{font:var(--dsw-font-caption,12px/1.5 -apple-system,system-ui,sans-serif);color:var(--dsw-alias-label-tertiary,#8b949e);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rs-doc-badge{flex:0 0 auto;margin-top:1px;padding:1px 7px;border-radius:999px;background:var(--rs-accent-tint);color:var(--rs-accent);font:var(--dsw-font-caption,11px/1.6 -apple-system,system-ui,sans-serif);font-weight:500}
+.rs-tabstrip{display:flex;align-items:center;gap:4px;overflow-x:auto;margin:14px -4px 0;padding:0 4px;border-bottom:1px solid var(--dsw-alias-border-l1,#d8dee4);scrollbar-width:none}
+.rs-tab{display:flex;align-items:center;gap:6px;max-width:220px;min-height:32px;padding:0 9px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--dsw-alias-label-tertiary,#8b949e);font:inherit;cursor:pointer;white-space:nowrap}
+.rs-tab:hover{color:var(--dsw-alias-label-primary,inherit)}
+.rs-tab[data-active="true"]{border-bottom-color:var(--rs-accent);color:var(--rs-accent)}
+.rs-tab-title{overflow:hidden;text-overflow:ellipsis}
+.rs-tab-close{display:grid;place-items:center;width:16px;height:16px;border:0;border-radius:4px;background:transparent;color:inherit;font-size:14px;line-height:1;cursor:pointer}
+.rs-tab-close:hover{background:var(--dsw-alias-interactive-bg-hover,#f6f8fa)}
+.rs-reader-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 4px 10px;border-bottom:1px solid var(--dsw-alias-border-l1,#d8dee4)}
+.rs-reader-title{font-weight:600;color:var(--dsw-alias-label-primary,inherit);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rs-reader-meta{font:var(--dsw-font-caption,12px/1.5 -apple-system,system-ui,sans-serif);color:var(--dsw-alias-label-tertiary,#8b949e)}
+.rs-reader-link{flex:0 0 auto;color:var(--rs-accent);text-decoration:none;font-size:12px}
+.rs-reader-link:hover{text-decoration:underline}
+.rs-reader{max-width:780px;margin:0 auto;padding:28px 12px 64px;white-space:pre-wrap;word-break:break-word;color:var(--dsw-alias-label-primary,inherit);font:var(--dsw-font-reader,15px/1.85 -apple-system,"Segoe UI",system-ui,sans-serif)}
+.rs-html-frame{width:100%;min-height:620px;margin-top:14px;border:1px solid var(--dsw-alias-border-l1,#d8dee4);border-radius:8px;background:#fff}
+.rs-reader-state{display:grid;place-items:center;min-height:320px;color:var(--dsw-alias-label-tertiary,#8b949e);font-size:12px}
+.rs-reader-state[data-state="error"]{color:var(--dsw-alias-state-error-primary,#cf222e)}
 @container (max-width: 520px){
   .rs-session{padding:18px 16px 24px}
   .rs-doc{padding:10px 6px}
@@ -162,10 +178,48 @@ export function RevisoSessionView(props: SessionViewProps) {
   ensureStyles()
   const sessionId = props.sessionId ?? ''
   const t = (key: RevisoLocaleKey): string => props.t?.(key) ?? zh[key]
+
+  function loadContent(documentId: string): void {
+    setContents(current => ({
+      ...current,
+      [documentId]: { status: 'loading' },
+    }))
+    void documentContent(documentId)
+      .then(data => {
+        setContents(current => ({ ...current, [documentId]: { status: 'live', data } }))
+      })
+      .catch((error: unknown) => {
+        setContents(current => ({
+          ...current,
+          [documentId]: {
+            status: 'error',
+            message: error instanceof Error ? error.message : String(error),
+          },
+        }))
+      })
+  }
+
+  function openDocument(doc: SessionDoc): void {
+    setOpenDocs(current => current.some(item => item.id === doc.id) ? current : [...current, doc])
+    setActiveDocId(doc.id)
+    if (contents[doc.id] === undefined) loadContent(doc.id)
+  }
+
+  function closeDocument(docId: string): void {
+    setOpenDocs(current => current.filter(item => item.id !== docId))
+    setActiveDocId(current => current === docId ? null : current)
+  }
   const [status, setStatus] = useState<RevisoStatus>('unconfigured')
   const [message, setMessage] = useState('')
   const [docs, setDocs] = useState<SessionDoc[]>([])
   const [reloadKey, setReloadKey] = useState(0)
+  const [openDocs, setOpenDocs] = useState<SessionDoc[]>([])
+  const [activeDocId, setActiveDocId] = useState<string | null>(null)
+  const [contents, setContents] = useState<Record<string, {
+    status: 'loading' | 'live' | 'error'
+    data?: RevisoDocumentContent
+    message?: string
+  }>>({})
 
   useEffect(() => {
     if (sessionId === '') return
@@ -207,6 +261,8 @@ export function RevisoSessionView(props: SessionViewProps) {
     : status === 'error'
       ? message || t('empty.error.body')
       : t('empty.unconfigured.body')
+  const activeDoc = activeDocId === null ? undefined : openDocs.find(doc => doc.id === activeDocId)
+  const activeContent = activeDocId === null ? undefined : contents[activeDocId]
 
   return (
     <div className='rs-session'>
@@ -221,59 +277,111 @@ export function RevisoSessionView(props: SessionViewProps) {
             <span>{t(`status.${status}` as RevisoLocaleKey)}</span>
           </div>
         </div>
+        {openDocs.length > 0 && (
+          <div className='rs-tabstrip' role='tablist' aria-label={t('tabs.list')}>
+            <button type='button' role='tab' aria-selected={activeDocId === null}
+              className='rs-tab' data-active={activeDocId === null}
+              onClick={() => setActiveDocId(null)}>
+              <span className='rs-tab-title'>{t('tabs.list')}</span>
+            </button>
+            {openDocs.map(doc => (
+              <div className='rs-tab' data-active={activeDocId === doc.id} key={doc.id}>
+                <button type='button' role='tab' aria-selected={activeDocId === doc.id}
+                  className='rs-tab-title'
+                  style={{ border: 0, background: 'transparent', color: 'inherit', font: 'inherit', padding: 0, cursor: 'pointer', maxWidth: 180 }}
+                  onClick={() => setActiveDocId(doc.id)}>
+                  {doc.title}
+                </button>
+                <button type='button' className='rs-tab-close' title={t('tabs.close')}
+                  onClick={() => closeDocument(doc.id)}>×</button>
+              </div>
+            ))}
+          </div>
+        )}
         {message !== '' && (
           <div className='rs-session-message' data-state={status === 'error' ? 'error' : undefined}>
             {message}
           </div>
         )}
-        {docs.length === 0
+        {activeDoc !== undefined
           ? (
-              <div className='rs-session-empty'>
-                <EmptyIllustration />
-                <strong>{emptyTitle}</strong>
-                <p>{emptyBody}</p>
-                {status !== 'live' && status !== 'loading' && (
-                  <button type='button' className='rs-primary' onClick={startRevisoOAuth}>
-                    {t('action.connect')}
-                  </button>
-                )}
-                {status === 'error' && (
-                  <button type='button' className='rs-secondary' onClick={() => setReloadKey(key => key + 1)}>
-                    {t('action.retry')}
-                  </button>
-                )}
+              <div className='rs-reader-view'>
+                <div className='rs-reader-head'>
+                  <div style={{ minWidth: 0 }}>
+                    <div className='rs-reader-title'>{activeDoc.title}</div>
+                    <div className='rs-reader-meta'>
+                      {activeContent?.data
+                        ? `${t('doc.version')} ${activeContent.data.version_no}`
+                        : activeDoc.creator}
+                    </div>
+                  </div>
+                  {activeDoc.url !== '' && (
+                    <a className='rs-reader-link' href={activeDoc.url} target='_blank' rel='noreferrer'>
+                      {t('doc.openExternal')}
+                    </a>
+                  )}
+                </div>
+                {activeContent?.status === 'live' && activeContent.data !== undefined
+                  ? (
+                      activeContent.data.source_format === 'html'
+                      || activeContent.data.document_kind === 'html_deck'
+                        ? (
+                            <iframe className='rs-html-frame' title={activeDoc.title}
+                              sandbox='allow-scripts'
+                              srcDoc={activeContent.data.content_html || activeContent.data.content} />
+                          )
+                        : <pre className='rs-reader'>{activeContent.data.content}</pre>
+                    )
+                  : activeContent?.status === 'error'
+                    ? (
+                        <div className='rs-reader-state' data-state='error'>
+                          {activeContent.message || t('doc.error')}
+                        </div>
+                      )
+                    : <div className='rs-reader-state'>{t('doc.loading')}</div>}
               </div>
             )
-          : (
-              <div className='rs-doc-list' role='list' aria-label={t('subtitle')}>
-                {docs.map(doc => {
-                  const meta = `${doc.creator} · ${relativeTime(
-                    doc.updatedAt === null ? undefined : new Date(doc.updatedAt).toISOString(),
-                    t,
-                  )}`
-                  const content = (
-                    <>
-                      <FileIcon kind={doc.kind} />
-                      <span className='rs-doc-main'>
-                        <span className='rs-doc-title'>{doc.title}</span>
-                        <span className='rs-doc-meta'>{meta}</span>
-                      </span>
-                      {doc.unresolved > 0 && (
-                        <span className='rs-doc-badge'>{doc.unresolved} {t('doc.pending')}</span>
-                      )}
-                    </>
-                  )
-                  return doc.url === ''
-                    ? <div className='rs-doc' role='listitem' key={doc.id}>{content}</div>
-                    : (
-                        <a className='rs-doc' role='listitem' key={doc.id}
-                          href={doc.url} target='_blank' rel='noreferrer'>
-                          {content}
-                        </a>
-                      )
-                })}
-              </div>
-            )}
+          : docs.length === 0
+            ? (
+                <div className='rs-session-empty'>
+                  <EmptyIllustration />
+                  <strong>{emptyTitle}</strong>
+                  <p>{emptyBody}</p>
+                  {status !== 'live' && status !== 'loading' && (
+                    <button type='button' className='rs-primary' onClick={startRevisoOAuth}>
+                      {t('action.connect')}
+                    </button>
+                  )}
+                  {status === 'error' && (
+                    <button type='button' className='rs-secondary' onClick={() => setReloadKey(key => key + 1)}>
+                      {t('action.retry')}
+                    </button>
+                  )}
+                </div>
+              )
+            : (
+                <div className='rs-doc-list' role='list' aria-label={t('subtitle')}>
+                  {docs.map(doc => {
+                    const meta = `${doc.creator} · ${relativeTime(
+                      doc.updatedAt === null ? undefined : new Date(doc.updatedAt).toISOString(),
+                      t,
+                    )}`
+                    return (
+                      <button type='button' className='rs-doc' role='listitem'
+                        key={doc.id} onClick={() => openDocument(doc)}>
+                        <FileIcon kind={doc.kind} />
+                        <span className='rs-doc-main'>
+                          <span className='rs-doc-title'>{doc.title}</span>
+                          <span className='rs-doc-meta'>{meta}</span>
+                        </span>
+                        {doc.unresolved > 0 && (
+                          <span className='rs-doc-badge'>{doc.unresolved} {t('doc.pending')}</span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
       </div>
     </div>
   )

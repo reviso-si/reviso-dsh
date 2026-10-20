@@ -95,6 +95,15 @@ function installFetch() {
     if (String(url).includes('/api/documents?session_key=dsh:sess_1')) {
       return json(200, { documents: [{ document_id: 'doc_1', title: 'Doc' }] })
     }
+    if (String(url).includes('/api/documents/doc_1/latest-content')) {
+      return json(200, {
+        document_id: 'doc_1',
+        version_id: 'ver_1',
+        version_no: 1,
+        source_format: 'markdown',
+        content: '# Doc',
+      })
+    }
     if (String(url).includes('/api/dashboard/documents?workspace_id=wsp_personal')) {
       return json(200, { reviews: [{ document_id: 'doc_1', title: 'Doc' }] })
     }
@@ -175,6 +184,19 @@ test('runs the OAuth start/callback flow without exposing the token', async () =
       documents: [{ document_id: 'doc_1', title: 'Doc' }],
     })
 
+    const documentRes = response()
+    await routes.get('/plugins/reviso/document')(
+      request('/plugins/reviso/document?id=doc_1'),
+      documentRes,
+    )
+    assert.deepEqual(JSON.parse(documentRes.body), {
+      document_id: 'doc_1',
+      version_id: 'ver_1',
+      version_no: 1,
+      source_format: 'markdown',
+      content: '# Doc',
+    })
+
     const dashboardRes = response()
     await routes.get('/plugins/reviso/dashboard')(
       request('/plugins/reviso/dashboard?limit=20'),
@@ -183,7 +205,7 @@ test('runs the OAuth start/callback flow without exposing the token', async () =
     assert.deepEqual(JSON.parse(dashboardRes.body), {
       reviews: [{ document_id: 'doc_1', title: 'Doc' }],
     })
-    assert.doesNotMatch(sessionRes.body + dashboardRes.body, /rak_oauth/)
+    assert.doesNotMatch(sessionRes.body + documentRes.body + dashboardRes.body, /rak_oauth/)
 
     const logoutRes = response()
     await routes.get('/plugins/reviso/auth/logout')(request('/plugins/reviso/auth/logout'), logoutRes)

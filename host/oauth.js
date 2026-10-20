@@ -51,6 +51,11 @@ export function createOAuthBridge(ctx, options = {}) {
     }),
     ctx.webServer.register({
       kind: 'exact',
+      path: '/plugins/reviso/document',
+      handler: (req, res) => handleDocument(ctx, req, res),
+    }),
+    ctx.webServer.register({
+      kind: 'exact',
       path: '/plugins/reviso/dashboard',
       handler: (req, res) => handleDashboard(ctx, req, res),
     }),
@@ -79,6 +84,22 @@ async function handleDocuments(ctx, req, res) {
     const body = await authenticatedGet(
       ctx,
       `/api/documents?session_key=dsh:${encodeURIComponent(sessionId)}`,
+    )
+    sendJson(res, 200, body)
+  } catch (error) {
+    sendJson(res, 502, { error: messageOf(error) })
+  }
+}
+
+async function handleDocument(ctx, req, res) {
+  if (!isLoopback(req)) return forbidden(res)
+  try {
+    const url = new URL(req.url || '', `http://${req.headers.host || '127.0.0.1'}`)
+    const documentId = url.searchParams.get('id') || ''
+    if (documentId === '') throw new Error('id required')
+    const body = await authenticatedGet(
+      ctx,
+      `/api/documents/${encodeURIComponent(documentId)}/latest-content`,
     )
     sendJson(res, 200, body)
   } catch (error) {
