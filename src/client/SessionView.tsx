@@ -97,6 +97,7 @@ const CSS = `
 .rs-tab:hover{color:var(--dsw-alias-label-primary,inherit)}
 .rs-tab[data-active="true"]{border-bottom-color:var(--rs-accent);color:var(--rs-accent)}
 .rs-tab-title{overflow:hidden;text-overflow:ellipsis}
+.rs-tab-home{justify-content:center;width:34px;padding:0}
 .rs-tab-close{display:grid;place-items:center;width:16px;height:16px;border:0;border-radius:4px;background:transparent;color:inherit;font-size:14px;line-height:1;cursor:pointer}
 .rs-tab-close:hover{background:var(--dsw-alias-interactive-bg-hover,#f6f8fa)}
 .rs-reader-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 4px 10px;border-bottom:1px solid var(--dsw-alias-border-l1,#d8dee4)}
@@ -135,6 +136,16 @@ function FileIcon({ kind }: { kind: SessionDoc['kind'] }) {
         <path d={path} />
       </svg>
     </span>
+  )
+}
+
+function HomeIcon() {
+  return (
+    <svg width='15' height='15' viewBox='0 0 24 24' fill='none' stroke='currentColor'
+      strokeWidth='1.8' strokeLinecap='round' strokeLinejoin='round' aria-hidden>
+      <path d='M3 10.8 12 3l9 7.8' />
+      <path d='M5 9.5V21h5v-6h4v6h5V9.5' />
+    </svg>
   )
 }
 
@@ -280,9 +291,10 @@ export function RevisoSessionView(props: SessionViewProps) {
         {openDocs.length > 0 && (
           <div className='rs-tabstrip' role='tablist' aria-label={t('tabs.list')}>
             <button type='button' role='tab' aria-selected={activeDocId === null}
-              className='rs-tab' data-active={activeDocId === null}
+              className='rs-tab rs-tab-home' data-active={activeDocId === null}
+              title={t('tabs.home')} aria-label={t('tabs.home')}
               onClick={() => setActiveDocId(null)}>
-              <span className='rs-tab-title'>{t('tabs.list')}</span>
+              <HomeIcon />
             </button>
             {openDocs.map(doc => (
               <div className='rs-tab' data-active={activeDocId === doc.id} key={doc.id}>
