@@ -110,13 +110,15 @@ The cross-repo contract (Reviso HTTP API + `source_kind` enum
 `dsh|claude|codex|cursor|mcp` + `session_key = kind:normalized_id`) is owned by
 the `reviso` main repo (L0). This package never talks to Supabase directly.
 
-Tested with dsh `0.1.0-rc.8`.
+Tested with DSH `0.2.1-rc.2` (client manifest aligned with the shell static module
+contract). The client bundle declares `@deepseek-ai/dsh-client-store` as an
+external and does not inject the retired `dsh-client-runtime` seed.
 
 ## See it locally
 
 `sh
 pnpm install && pnpm run build:client   # produce lib/client.js
-dsh plugin --profile web add /Users/touchskyer/Code/reviso-projects/reviso-dsh
+dsh plugin --profile web add /Users/touchskyer/Code/reviso-projects/reviso-dsh-embed-v1
 dsh web                                  # Reviso entry sits beside Settings in the sidebar
 `
 
