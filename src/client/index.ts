@@ -1,4 +1,4 @@
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import { createRevisoStore, loadDocs } from './state.ts'
 import { RevisoFooterAction } from './FooterAction.tsx'
 import { RevisoPanel } from './Panel.tsx'

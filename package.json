@@ -38,13 +38,16 @@
       "patch": "./cordis.patch.yml"
     },
     "client": {
-      "inject": [
-        "@deepseek-ai/dsh-client-runtime"
+      "inject": [],
+      "external": [
+        "@deepseek-ai/dsh-client-store"
       ],
       "platform": "web"
     }
   },
   "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/dsh-client-store": "0.2.1-rc.2",
     "tsdown": "^0.12.9"
   }
 }
