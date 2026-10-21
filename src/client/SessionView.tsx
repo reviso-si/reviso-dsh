@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { RevisoStatus } from './state.ts'
 import { zh, type RevisoLocaleKey } from './locales.ts'
 import {
-  connectionStatus, documentContent, onRevisoConnected, sessionDocuments, startRevisoOAuth,
-  type RevisoDocumentContent, type RevisoRow,
+  connectionStatus, embedSession, onRevisoConnected, sessionDocuments, startRevisoOAuth,
+  type RevisoRow,
 } from './host.ts'
 
 interface SessionViewProps {
@@ -53,6 +53,21 @@ function mapRow(row: RevisoRow, server: string): SessionDoc | null {
     updatedAt: Number.isFinite(updated) ? updated : null,
     kind,
     unresolved: typeof row.unresolved_count === 'number' ? row.unresolved_count : 0,
+  }
+}
+
+function preferredTheme(): 'light' | 'dark' | 'system' {
+  const selected = document.documentElement.dataset.theme
+  if (selected === 'light' || selected === 'dark') return selected
+  return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+function sameOrigin(value: string | undefined, origin: string): boolean {
+  if (value === undefined || origin === '') return false
+  try {
+    return new URL(value).origin === origin
+  } catch {
+    return false
   }
 }
 
@@ -107,8 +122,10 @@ const CSS = `
 .rs-reader-link:hover{text-decoration:underline}
 .rs-reader{max-width:780px;margin:0 auto;padding:28px 12px 64px;white-space:pre-wrap;word-break:break-word;color:var(--dsw-alias-label-primary,inherit);font:var(--dsw-font-reader,15px/1.85 -apple-system,"Segoe UI",system-ui,sans-serif)}
 .rs-html-frame{width:100%;min-height:620px;margin-top:14px;border:1px solid var(--dsw-alias-border-l1,#d8dee4);border-radius:8px;background:#fff}
-.rs-reader-state{display:grid;place-items:center;min-height:320px;color:var(--dsw-alias-label-tertiary,#8b949e);font-size:12px}
+.rs-reader-state{display:grid;gap:10px;place-items:center;min-height:320px;color:var(--dsw-alias-label-tertiary,#8b949e);font-size:12px;text-align:center}
 .rs-reader-state[data-state="error"]{color:var(--dsw-alias-state-error-primary,#cf222e)}
+.rs-reader-actions{display:flex;align-items:center;gap:10px}
+.rs-embed-frame{display:block;width:100%;height:calc(100dvh - 176px);min-height:560px;margin-top:12px;border:0;border-radius:8px;background:var(--dsw-alias-bg-base,#fff)}
 @container (max-width: 520px){
   .rs-session{padding:18px 16px 24px}
   .rs-doc{padding:10px 6px}
@@ -190,19 +207,19 @@ export function RevisoSessionView(props: SessionViewProps) {
   const sessionId = props.sessionId ?? ''
   const t = (key: RevisoLocaleKey): string => props.t?.(key) ?? zh[key]
 
-  function loadContent(documentId: string): void {
-    setContents(current => ({
-      ...current,
-      [documentId]: { status: 'loading' },
-    }))
-    void documentContent(documentId)
+  function loadEmbed(doc: SessionDoc): void {
+    setEmbeds(current => ({ ...current, [doc.id]: { status: 'loading' } }))
+    void embedSession(doc.id, preferredTheme())
       .then(data => {
-        setContents(current => ({ ...current, [documentId]: { status: 'live', data } }))
+        setEmbeds(current => ({
+          ...current,
+          [doc.id]: { status: 'live', url: data.embed_url },
+        }))
       })
       .catch((error: unknown) => {
-        setContents(current => ({
+        setEmbeds(current => ({
           ...current,
-          [documentId]: {
+          [doc.id]: {
             status: 'error',
             message: error instanceof Error ? error.message : String(error),
           },
@@ -213,12 +230,17 @@ export function RevisoSessionView(props: SessionViewProps) {
   function openDocument(doc: SessionDoc): void {
     setOpenDocs(current => current.some(item => item.id === doc.id) ? current : [...current, doc])
     setActiveDocId(doc.id)
-    if (contents[doc.id] === undefined) loadContent(doc.id)
+    if (embeds[doc.id]?.status !== 'live') loadEmbed(doc)
   }
 
   function closeDocument(docId: string): void {
     setOpenDocs(current => current.filter(item => item.id !== docId))
     setActiveDocId(current => current === docId ? null : current)
+    setEmbeds(current => {
+      const next = { ...current }
+      delete next[docId]
+      return next
+    })
   }
   const [status, setStatus] = useState<RevisoStatus>('unconfigured')
   const [message, setMessage] = useState('')
@@ -226,9 +248,10 @@ export function RevisoSessionView(props: SessionViewProps) {
   const [reloadKey, setReloadKey] = useState(0)
   const [openDocs, setOpenDocs] = useState<SessionDoc[]>([])
   const [activeDocId, setActiveDocId] = useState<string | null>(null)
-  const [contents, setContents] = useState<Record<string, {
+  const iframeRefs = useRef(new Map<string, HTMLIFrameElement>())
+  const [embeds, setEmbeds] = useState<Record<string, {
     status: 'loading' | 'live' | 'error'
-    data?: RevisoDocumentContent
+    url?: string
     message?: string
   }>>({})
 
@@ -262,6 +285,27 @@ export function RevisoSessionView(props: SessionViewProps) {
     return () => { alive = false; off() }
   }, [sessionId, reloadKey])
 
+  useEffect(() => {
+    const listener = (event: MessageEvent) => {
+      const data = event.data as {
+        type?: string; code?: string; documentId?: string
+      } | null
+      if (data?.type !== 'reviso:error' && data?.type !== 'reviso:expired') return
+      const documentId = data.documentId || ''
+      if (iframeRefs.current.get(documentId)?.contentWindow !== event.source) return
+      setEmbeds(current => {
+        const embed = current[documentId]
+        if (embed?.status !== 'live' || !sameOrigin(embed.url, event.origin)) return current
+        return {
+          ...current,
+          [documentId]: { ...embed, status: 'error', message: t('doc.error') },
+        }
+      })
+    }
+    window.addEventListener('message', listener)
+    return () => window.removeEventListener('message', listener)
+  }, [t])
+
   const emptyTitle = status === 'live'
     ? t('empty.live.title')
     : status === 'error'
@@ -272,9 +316,6 @@ export function RevisoSessionView(props: SessionViewProps) {
     : status === 'error'
       ? message || t('empty.error.body')
       : t('empty.unconfigured.body')
-  const activeDoc = activeDocId === null ? undefined : openDocs.find(doc => doc.id === activeDocId)
-  const activeContent = activeDocId === null ? undefined : contents[activeDocId]
-
   return (
     <div className='rs-session'>
       <div className='rs-session-inner'>
@@ -315,85 +356,84 @@ export function RevisoSessionView(props: SessionViewProps) {
             {message}
           </div>
         )}
-        {activeDoc !== undefined
-          ? (
-              <div className='rs-reader-view'>
-                <div className='rs-reader-head'>
-                  <div style={{ minWidth: 0 }}>
-                    <div className='rs-reader-title'>{activeDoc.title}</div>
-                    <div className='rs-reader-meta'>
-                      {activeContent?.data
-                        ? `${t('doc.version')} ${activeContent.data.version_no}`
-                        : activeDoc.creator}
-                    </div>
-                  </div>
-                  {activeDoc.url !== '' && (
-                    <a className='rs-reader-link' href={activeDoc.url} target='_blank' rel='noreferrer'>
-                      {t('doc.openExternal')}
-                    </a>
-                  )}
-                </div>
-                {activeContent?.status === 'live' && activeContent.data !== undefined
+        {openDocs.map(doc => {
+          const embed = embeds[doc.id]
+          return (
+            <div className='rs-reader-view' hidden={activeDocId !== doc.id} key={doc.id}>
+              {embed?.status === 'live' && embed.url !== undefined
+                ? (
+                    <iframe
+                      ref={node => {
+                        if (node === null) iframeRefs.current.delete(doc.id)
+                        else iframeRefs.current.set(doc.id, node)
+                      }}
+                      className='rs-embed-frame' title={doc.title}
+                      src={embed.url}
+                      sandbox='allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox'
+                      referrerPolicy='no-referrer'
+                      loading='eager' />
+                  )
+                : embed?.status === 'error'
                   ? (
-                      activeContent.data.source_format === 'html'
-                      || activeContent.data.document_kind === 'html_deck'
-                        ? (
-                            <iframe className='rs-html-frame' title={activeDoc.title}
-                              sandbox='allow-scripts'
-                              srcDoc={activeContent.data.content_html || activeContent.data.content} />
-                          )
-                        : <pre className='rs-reader'>{activeContent.data.content}</pre>
-                    )
-                  : activeContent?.status === 'error'
-                    ? (
-                        <div className='rs-reader-state' data-state='error'>
-                          {activeContent.message || t('doc.error')}
+                      <div className='rs-reader-state' data-state='error'>
+                        <span>{embed.message || t('doc.error')}</span>
+                        <div className='rs-reader-actions'>
+                          <button type='button' className='rs-secondary' onClick={() => loadEmbed(doc)}>
+                            {t('action.retry')}
+                          </button>
+                          {doc.url !== '' && (
+                            <a className='rs-reader-link' href={doc.url} target='_blank' rel='noreferrer'>
+                              {t('doc.openExternal')}
+                            </a>
+                          )}
                         </div>
-                      )
-                    : <div className='rs-reader-state'>{t('doc.loading')}</div>}
+                      </div>
+                    )
+                  : <div className='rs-reader-state'>{t('doc.loading')}</div>}
+            </div>
+          )
+        })}
+        {activeDocId === null && (docs.length === 0
+          ? (
+              <div className='rs-session-empty'>
+                <EmptyIllustration />
+                <strong>{emptyTitle}</strong>
+                <p>{emptyBody}</p>
+                {status !== 'live' && status !== 'loading' && (
+                  <button type='button' className='rs-primary' onClick={startRevisoOAuth}>
+                    {t('action.connect')}
+                  </button>
+                )}
+                {status === 'error' && (
+                  <button type='button' className='rs-secondary' onClick={() => setReloadKey(key => key + 1)}>
+                    {t('action.retry')}
+                  </button>
+                )}
               </div>
             )
-          : docs.length === 0
-            ? (
-                <div className='rs-session-empty'>
-                  <EmptyIllustration />
-                  <strong>{emptyTitle}</strong>
-                  <p>{emptyBody}</p>
-                  {status !== 'live' && status !== 'loading' && (
-                    <button type='button' className='rs-primary' onClick={startRevisoOAuth}>
-                      {t('action.connect')}
+          : (
+              <div className='rs-doc-list' role='list' aria-label={t('subtitle')}>
+                {docs.map(doc => {
+                  const meta = `${doc.creator} · ${relativeTime(
+                    doc.updatedAt === null ? undefined : new Date(doc.updatedAt).toISOString(),
+                    t,
+                  )}`
+                  return (
+                    <button type='button' className='rs-doc' role='listitem'
+                      key={doc.id} onClick={() => openDocument(doc)}>
+                      <FileIcon kind={doc.kind} />
+                      <span className='rs-doc-main'>
+                        <span className='rs-doc-title'>{doc.title}</span>
+                        <span className='rs-doc-meta'>{meta}</span>
+                      </span>
+                      {doc.unresolved > 0 && (
+                        <span className='rs-doc-badge'>{doc.unresolved} {t('doc.pending')}</span>
+                      )}
                     </button>
-                  )}
-                  {status === 'error' && (
-                    <button type='button' className='rs-secondary' onClick={() => setReloadKey(key => key + 1)}>
-                      {t('action.retry')}
-                    </button>
-                  )}
-                </div>
-              )
-            : (
-                <div className='rs-doc-list' role='list' aria-label={t('subtitle')}>
-                  {docs.map(doc => {
-                    const meta = `${doc.creator} · ${relativeTime(
-                      doc.updatedAt === null ? undefined : new Date(doc.updatedAt).toISOString(),
-                      t,
-                    )}`
-                    return (
-                      <button type='button' className='rs-doc' role='listitem'
-                        key={doc.id} onClick={() => openDocument(doc)}>
-                        <FileIcon kind={doc.kind} />
-                        <span className='rs-doc-main'>
-                          <span className='rs-doc-title'>{doc.title}</span>
-                          <span className='rs-doc-meta'>{meta}</span>
-                        </span>
-                        {doc.unresolved > 0 && (
-                          <span className='rs-doc-badge'>{doc.unresolved} {t('doc.pending')}</span>
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
+                  )
+                })}
+              </div>
+            ))}
       </div>
     </div>
   )

@@ -95,6 +95,16 @@ function installFetch() {
     if (String(url).includes('/api/documents?session_key=dsh:sess_1')) {
       return json(200, { documents: [{ document_id: 'doc_1', title: 'Doc' }] })
     }
+    if (String(url).endsWith('/api/embed/v1/documents/doc_abcdef123456/sessions')) {
+      return json(201, {
+        session_id: 'ems_abcdef123456',
+        document_id: 'doc_abcdef123456',
+        embed_url: 'https://reviso.work/embed/v1/documents/doc_abcdef123456?session=ems_abcdef123456#code=rem_code_secret',
+        code_expires_at: '2026-01-01T00:01:00+00:00',
+        code_expires_in: 60,
+        token_expires_in: 900,
+      })
+    }
     if (String(url).includes('/api/documents/doc_1/latest-content')) {
       return json(200, {
         document_id: 'doc_1',
@@ -196,6 +206,26 @@ test('runs the OAuth start/callback flow without exposing the token', async () =
       source_format: 'markdown',
       content: '# Doc',
     })
+
+    const embedRes = response()
+    await routes.get('/plugins/reviso/embed-session')({
+      url: '/plugins/reviso/embed-session',
+      method: 'POST',
+      headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+      body: { document_id: 'doc_abcdef123456', theme: 'dark', locale: 'zh-CN' },
+    }, embedRes)
+    assert.equal(embedRes.status, 200, embedRes.body)
+    assert.equal(JSON.parse(embedRes.body).session_id, 'ems_abcdef123456')
+    const embedCall = fakeFetch.calls.find(call => call.url.endsWith('/api/embed/v1/documents/doc_abcdef123456/sessions'))
+    assert.equal(embedCall.options.method, 'POST')
+    assert.deepEqual(JSON.parse(embedCall.options.body), {
+      host: 'dsh',
+      origin: 'http://127.0.0.1:3080',
+      capabilities: ['read'],
+      theme: 'dark',
+      locale: 'zh-CN',
+    })
+    assert.doesNotMatch(embedRes.body, /rak_oauth/)
 
     const dashboardRes = response()
     await routes.get('/plugins/reviso/dashboard')(

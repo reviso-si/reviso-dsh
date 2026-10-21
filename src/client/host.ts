@@ -53,12 +53,29 @@ export async function sessionDocuments(sessionId: string): Promise<RevisoRow[]> 
   return Array.isArray(body.documents) ? body.documents : []
 }
 
-export async function documentContent(documentId: string): Promise<RevisoDocumentContent> {
-  const res = await fetch(`/plugins/reviso/document?id=${encodeURIComponent(documentId)}`, {
-    headers: { Accept: 'application/json' },
+export interface RevisoEmbedSession {
+  session_id: string
+  document_id: string
+  embed_url: string
+  code_expires_at: string
+  code_expires_in: number
+  token_expires_in: number
+}
+
+export async function embedSession(
+  documentId: string,
+  theme: 'light' | 'dark' | 'system',
+): Promise<RevisoEmbedSession> {
+  const res = await fetch('/plugins/reviso/embed-session', {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ document_id: documentId, theme, locale: navigator.language }),
   })
-  if (!res.ok) throw new Error(`document HTTP ${res.status}`)
-  return await res.json() as RevisoDocumentContent
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { error?: string }
+    throw new Error(body.error || `embed session HTTP ${res.status}`)
+  }
+  return await res.json() as RevisoEmbedSession
 }
 
 export function startRevisoOAuth(): void {

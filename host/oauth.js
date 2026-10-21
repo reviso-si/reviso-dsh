@@ -16,6 +16,7 @@ import {
 const DEFAULT_SERVER = 'https://reviso.work'
 const PENDING_TTL_MS = 10 * 60 * 1000
 const REQUEST_TIMEOUT_MS = 30_000
+const JSON_BODY_LIMIT_BYTES = 64 * 1024
 
 export function createOAuthBridge(ctx, options = {}) {
   if (ctx.webServer?.register === undefined) return () => {}
@@ -53,6 +54,11 @@ export function createOAuthBridge(ctx, options = {}) {
       kind: 'exact',
       path: '/plugins/reviso/document',
       handler: (req, res) => handleDocument(ctx, req, res),
+    }),
+    ctx.webServer.register({
+      kind: 'exact',
+      path: '/plugins/reviso/embed-session',
+      handler: (req, res) => handleEmbedSession(ctx, req, res),
     }),
     ctx.webServer.register({
       kind: 'exact',
@@ -102,6 +108,43 @@ async function handleDocument(ctx, req, res) {
       `/api/documents/${encodeURIComponent(documentId)}/latest-content`,
     )
     sendJson(res, 200, body)
+  } catch (error) {
+    sendJson(res, 502, { error: messageOf(error) })
+  }
+}
+
+async function handleEmbedSession(ctx, req, res) {
+  if (!isLoopback(req)) return forbidden(res)
+  if ((req.method || 'POST') !== 'POST') {
+    sendJson(res, 405, { error: 'method_not_allowed' })
+    return
+  }
+  let body
+  try {
+    body = await readJsonRequest(req)
+  } catch (error) {
+    sendJson(res, 400, { error: messageOf(error) })
+    return
+  }
+  const documentId = String(body.document_id || '')
+  if (!/^[a-z]{2,4}_[0-9a-f]{12}$/.test(documentId)) {
+    sendJson(res, 400, { error: 'valid document_id required' })
+    return
+  }
+  try {
+    const result = await authenticatedPost(
+      ctx,
+      `/api/embed/v1/documents/${encodeURIComponent(documentId)}/sessions`,
+      {
+        host: 'dsh',
+        origin: requestOrigin(req),
+        capabilities: ['read'],
+        theme: normalizeTheme(body.theme),
+        locale: String(body.locale || 'en').slice(0, 24),
+      },
+    )
+    const credential = await readCredential(ctx)
+    sendJson(res, 200, validateEmbedSession(result, credential.server, documentId))
   } catch (error) {
     sendJson(res, 502, { error: messageOf(error) })
   }
@@ -285,12 +328,42 @@ async function authenticatedGet(ctx, path) {
   return JSON.parse(result.text)
 }
 
+async function authenticatedPost(ctx, path, body) {
+  let credential = await readCredential(ctx)
+  let result = await revisoPostRaw(credential, path, body)
+  if (result.status === 401 && credential.refreshToken !== '') {
+    credential = await readCredential(ctx, { forceRefresh: true })
+    result = await revisoPostRaw(credential, path, body)
+  }
+  if (result.status < 200 || result.status >= 300) {
+    throw new Error(`Reviso request failed (HTTP ${result.status}): ${result.text.slice(0, 300)}`)
+  }
+  return JSON.parse(result.text)
+}
+
 async function revisoGetRaw(credential, path) {
+  return revisoRaw(credential, path, { method: 'GET' })
+}
+
+async function revisoPostRaw(credential, path, body) {
+  return revisoRaw(credential, path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+async function revisoRaw(credential, path, options) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   try {
     const response = await fetch(`${credential.server}${path}`, {
-      headers: { Accept: 'application/json', Authorization: `Bearer ${credential.token}` },
+      ...options,
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${credential.token}`,
+        ...(options.headers || {}),
+      },
       signal: controller.signal,
     })
     return { status: response.status, text: await response.text() }
@@ -341,6 +414,53 @@ function challenge(verifier) {
 
 function base64url(buffer) {
   return Buffer.from(buffer).toString('base64url')
+}
+
+function requestOrigin(req) {
+  const origin = String(req.headers.origin || '')
+  if (origin !== '') return new URL(origin).origin
+  return `http://${req.headers.host || '127.0.0.1'}`
+}
+
+function normalizeTheme(value) {
+  return value === 'light' || value === 'dark' || value === 'system' ? value : 'system'
+}
+
+function validateEmbedSession(result, server, documentId) {
+  if (typeof result !== 'object' || result === null) throw new Error('invalid embed session response')
+  const sessionId = String(result.session_id || '')
+  if (!/^ems_[0-9a-f]{12}$/.test(sessionId)) throw new Error('invalid embed session id')
+  if (String(result.document_id || '') !== documentId) throw new Error('embed session document mismatch')
+  const embedUrl = new URL(String(result.embed_url || ''))
+  const expected = new URL(server)
+  if (embedUrl.origin !== expected.origin) throw new Error('embed session origin mismatch')
+  if (embedUrl.pathname !== `/embed/v1/documents/${documentId}`) {
+    throw new Error('embed session path mismatch')
+  }
+  if (embedUrl.searchParams.get('session') !== sessionId) {
+    throw new Error('embed session id mismatch')
+  }
+  const code = new URLSearchParams(embedUrl.hash.slice(1)).get('code') || ''
+  if (!code.startsWith('rem_code_')) throw new Error('embed session code missing')
+  return { ...result, session_id: sessionId, embed_url: embedUrl.toString() }
+}
+
+async function readJsonRequest(req) {
+  if (req.body !== undefined && req.body !== null) {
+    if (Buffer.isBuffer(req.body)) {
+      if (req.body.length > JSON_BODY_LIMIT_BYTES) throw new Error('request body too large')
+      return JSON.parse(req.body.toString('utf8'))
+    }
+    if (typeof req.body === 'object') return req.body
+    if (String(req.body).length > JSON_BODY_LIMIT_BYTES) throw new Error('request body too large')
+    return JSON.parse(String(req.body))
+  }
+  let body = ''
+  for await (const chunk of req) {
+    body += Buffer.from(chunk).toString('utf8')
+    if (body.length > JSON_BODY_LIMIT_BYTES) throw new Error('request body too large')
+  }
+  return JSON.parse(body || '{}')
 }
 
 function isLoopback(req, { allowCrossSite = false } = {}) {
