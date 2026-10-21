@@ -1,34 +1,47 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
-import { createRevisoStore, loadDocs } from './state.ts'
-import { RevisoFooterAction } from './FooterAction.tsx'
-import { RevisoPanel } from './Panel.tsx'
-import { RevisoSessionView } from './SessionView.tsx'
 import { en, zh } from './locales.ts'
+import { RevisoGlobalPanel } from './GlobalPanel.tsx'
+import { RevisoPanelIcon } from './PanelIcon.tsx'
+import { RevisoSessionView } from './SessionView.tsx'
+import { RevisoConnectionSection } from './ConnectionSection.tsx'
 
 /** Required services: UI slots and the host language dictionaries. */
 export const inject = ['slots', 'locale']
 
+const PANEL_ID = 'reviso'
+
 /**
- * Register the Reviso sidebar entry and the frame-wide panel. Fail-soft: a
- * registration problem must never take down the host boot.
- * @param ctx - Client root context.
+ * Register the global Reviso workspace and the per-session Reviso view.
+ * Fail-soft: a registration problem must never take down host boot.
  */
 export function apply(ctx: ClientContext): void {
   try {
-    const store = createRevisoStore()
-    const engine = store.create()
     ctx.effect(() => ctx.locale.register('reviso-dsh', { zh, en }), 'reviso-dsh dictionaries')
 
-    ctx.slots.inject('sidebar.footer.action', () =>
+    ctx.slots.inject('main', () =>
       ctx.slots.register({
-        name: 'sidebar.footer.action',
-        id: 'reviso-dsh.action',
-        order: 50,
+        name: 'main',
+        key: PANEL_ID,
+        locale: 'reviso-dsh',
+      }, RevisoGlobalPanel))
+
+    ctx.slots.inject('sidebar.panellist', () =>
+      ctx.slots.register({
+        name: 'sidebar.panellist',
+        id: PANEL_ID,
+        order: 20,
         label: 'Reviso',
         locale: 'reviso-dsh',
-        store,
-        inject: () => ({ onToggle: () => engine.actions.togglePanel() }),
-      }, RevisoFooterAction))
+      }, RevisoPanelIcon))
+
+    ctx.slots.inject('settings.section', () =>
+      ctx.slots.register({
+        name: 'settings.section',
+        id: 'reviso-connection',
+        order: 50,
+        label: 'Reviso connection',
+        locale: 'reviso-dsh',
+      }, RevisoConnectionSection))
 
     ctx.slots.inject('conversation.view', () =>
       ctx.slots.register({
@@ -38,18 +51,6 @@ export function apply(ctx: ClientContext): void {
         label: 'Reviso',
         locale: 'reviso-dsh',
       }, RevisoSessionView))
-
-    ctx.slots.inject('shell.overlay', () =>
-      ctx.slots.register({
-        name: 'shell.overlay',
-        id: 'reviso-dsh.panel',
-        order: 10,
-        locale: 'reviso-dsh',
-        store,
-        inject: () => ({
-          onReload: () => { void loadDocs(engine) },
-        }),
-      }, RevisoPanel))
   } catch (err) {
     console.warn('[reviso-dsh] client registration failed:', err)
   }

@@ -8,9 +8,9 @@ const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url),
 
 test('client manifest declares every runtime external and no retired runtime seed', () => {
   assert.deepEqual(pkg.dsh.client.inject, [])
-  assert.deepEqual(pkg.dsh.client.external, ['@deepseek-ai/dsh-client-store'])
+  assert.deepEqual(pkg.dsh.client.external, [])
   assert.equal(bundle.includes('@deepseek-ai/dsh-client-runtime'), false)
-  assert.equal(bundle.includes('@deepseek-ai/dsh-client-store'), true)
+  assert.equal(bundle.includes('@deepseek-ai/dsh-client-store'), false)
 })
 
 test('client factory materializes with only the declared DSH shell seeds', () => {
@@ -23,14 +23,12 @@ test('client factory materializes with only the declared DSH shell seeds', () =>
   const seeds = new Map([
     ['react', {}],
     ['react/jsx-runtime', {}],
-    ['@deepseek-ai/dsh-client-store', {}],
   ])
   const client = registration.factory(specifier => {
     assert.ok(seeds.has(specifier), `Unregistered DSH shell seed: ${specifier}`)
     imports.push(specifier)
     return seeds.get(specifier)
   })
-  assert.ok(imports.includes('@deepseek-ai/dsh-client-store'))
   assert.equal(typeof client.apply, 'function')
   assert.deepEqual(Array.from(client.inject), ['slots', 'locale'])
 })

@@ -16,6 +16,7 @@ export interface RevisoRow {
   url?: string
   review_url?: string
   lifecycle_status?: string
+  source_session_id?: string
 }
 
 export interface RevisoDocumentContent {
@@ -35,8 +36,10 @@ export async function connectionStatus(): Promise<RevisoConnectionStatus> {
   return await res.json() as RevisoConnectionStatus
 }
 
-export async function dashboardDocuments(limit = 50): Promise<RevisoRow[]> {
-  const res = await fetch(`/plugins/reviso/dashboard?limit=${limit}`, {
+export async function dashboardDocuments(limit = 50, sourceKind?: string): Promise<RevisoRow[]> {
+  const query = new URLSearchParams({ limit: String(limit) })
+  if (sourceKind !== undefined) query.set('source_kind', sourceKind)
+  const res = await fetch(`/plugins/reviso/dashboard?${query}`, {
     headers: { Accept: 'application/json' },
   })
   if (!res.ok) throw new Error(`dashboard HTTP ${res.status}`)
@@ -62,6 +65,22 @@ export interface RevisoEmbedSession {
   token_expires_in: number
 }
 
+export class RevisoHttpError extends Error {
+  constructor(readonly status: number, message: string, readonly code = 'request_failed') {
+    super(message)
+    this.name = 'RevisoHttpError'
+  }
+}
+
+export async function documentContent(documentId: string): Promise<RevisoDocumentContent> {
+  const res = await fetch(`/plugins/reviso/document?id=${encodeURIComponent(documentId)}`, { headers: { Accept: 'application/json' } })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { error?: string; code?: string }
+    throw new RevisoHttpError(res.status, body.error || `document HTTP ${res.status}`, body.code)
+  }
+  return await res.json() as RevisoDocumentContent
+}
+
 export async function embedSession(
   documentId: string,
   theme: 'light' | 'dark' | 'system',
@@ -72,8 +91,8 @@ export async function embedSession(
     body: JSON.stringify({ document_id: documentId, theme, locale: navigator.language }),
   })
   if (!res.ok) {
-    const body = await res.json().catch(() => ({})) as { error?: string }
-    throw new Error(body.error || `embed session HTTP ${res.status}`)
+    const body = await res.json().catch(() => ({})) as { error?: string; code?: string }
+    throw new RevisoHttpError(res.status, body.error || `embed session HTTP ${res.status}`, body.code)
   }
   return await res.json() as RevisoEmbedSession
 }

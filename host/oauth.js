@@ -18,6 +18,14 @@ const PENDING_TTL_MS = 10 * 60 * 1000
 const REQUEST_TIMEOUT_MS = 30_000
 const JSON_BODY_LIMIT_BYTES = 64 * 1024
 
+class RevisoHttpError extends Error {
+  constructor(status, text) {
+    super(`Reviso request failed (HTTP ${status}): ${text.slice(0, 300)}`)
+    this.name = 'RevisoHttpError'
+    this.status = status
+  }
+}
+
 export function createOAuthBridge(ctx, options = {}) {
   if (ctx.webServer?.register === undefined) return () => {}
 
@@ -78,6 +86,9 @@ async function handleStatus(ctx, req, res) {
     connected: token.configured && server !== '' && workspaceId !== '',
     server,
     workspaceId,
+    capabilities: {
+      embed: process.env.REVISO_DSH_EMBED_CAPABILITY || 'unknown',
+    },
   })
 }
 
@@ -93,7 +104,7 @@ async function handleDocuments(ctx, req, res) {
     )
     sendJson(res, 200, body)
   } catch (error) {
-    sendJson(res, 502, { error: messageOf(error) })
+    sendError(res, error)
   }
 }
 
@@ -109,7 +120,7 @@ async function handleDocument(ctx, req, res) {
     )
     sendJson(res, 200, body)
   } catch (error) {
-    sendJson(res, 502, { error: messageOf(error) })
+    sendError(res, error)
   }
 }
 
@@ -146,7 +157,7 @@ async function handleEmbedSession(ctx, req, res) {
     const credential = await readCredential(ctx)
     sendJson(res, 200, validateEmbedSession(result, credential.server, documentId))
   } catch (error) {
-    sendJson(res, 502, { error: messageOf(error) })
+    sendError(res, error)
   }
 }
 
@@ -156,14 +167,16 @@ async function handleDashboard(ctx, req, res) {
     const credential = await readCredential(ctx)
     const url = new URL(req.url || '', `http://${req.headers.host || '127.0.0.1'}`)
     const limit = url.searchParams.get('limit') || '50'
+    const sourceKind = url.searchParams.get('source_kind') || ''
     const body = await authenticatedGet(
       ctx,
       `/api/dashboard/documents?workspace_id=${encodeURIComponent(credential.workspaceId)}`
-      + `&limit=${encodeURIComponent(limit)}`,
+      + `&limit=${encodeURIComponent(limit)}`
+      + (sourceKind === '' ? '' : `&source_kind=${encodeURIComponent(sourceKind)}`),
     )
     sendJson(res, 200, body)
   } catch (error) {
-    sendJson(res, 502, { error: messageOf(error) })
+    sendError(res, error)
   }
 }
 
@@ -323,7 +336,7 @@ async function authenticatedGet(ctx, path) {
     result = await revisoGetRaw(credential, path)
   }
   if (result.status < 200 || result.status >= 300) {
-    throw new Error(`Reviso read failed (HTTP ${result.status}): ${result.text.slice(0, 300)}`)
+    throw new RevisoHttpError(result.status, result.text)
   }
   return JSON.parse(result.text)
 }
@@ -336,7 +349,7 @@ async function authenticatedPost(ctx, path, body) {
     result = await revisoPostRaw(credential, path, body)
   }
   if (result.status < 200 || result.status >= 300) {
-    throw new Error(`Reviso request failed (HTTP ${result.status}): ${result.text.slice(0, 300)}`)
+    throw new RevisoHttpError(result.status, result.text)
   }
   return JSON.parse(result.text)
 }
@@ -515,6 +528,15 @@ function renderError(res, error) {
 
 function messageOf(error) {
   return error instanceof Error ? error.message : String(error)
+}
+
+function sendError(res, error, fallbackStatus = 502) {
+  const status = error instanceof RevisoHttpError ? error.status : fallbackStatus
+  sendJson(res, status, {
+    error: messageOf(error),
+    code: error instanceof RevisoHttpError && status === 404 ? 'not_implemented' : 'request_failed',
+    status,
+  })
 }
 
 function escapeHtml(value) {

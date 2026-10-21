@@ -115,6 +115,7 @@ function installFetch() {
       })
     }
     if (String(url).includes('/api/dashboard/documents?workspace_id=wsp_personal')) {
+      if (String(url).includes('source_kind=dsh')) return json(200, { reviews: [{ document_id: 'doc_1', title: 'Doc', source_session_id: 'sess_1' }] })
       return json(200, { reviews: [{ document_id: 'doc_1', title: 'Doc' }] })
     }
     return json(404, { error: 'not found' })
@@ -128,6 +129,46 @@ function json(status, value) {
     headers: { 'Content-Type': 'application/json' },
   })
 }
+
+
+test('dashboard forwards DSH source scope while retaining the host bridge', async () => {
+  const { routes, values } = setupBridge()
+  values.set('REVISO_DSH_TOKEN', 'rak_dashboard')
+  values.set('REVISO_DSH_SERVER', 'https://reviso.work')
+  values.set('REVISO_DSH_WORKSPACE_ID', 'wsp_personal')
+  const fakeFetch = installFetch()
+  try {
+    const res = response()
+    await routes.get('/plugins/reviso/dashboard')(request('/plugins/reviso/dashboard?limit=25&source_kind=dsh'), res)
+    assert.equal(res.status, 200)
+    assert.match(fakeFetch.calls.at(-1).url, /workspace_id=wsp_personal/)
+    assert.match(fakeFetch.calls.at(-1).url, /limit=25/)
+    assert.match(fakeFetch.calls.at(-1).url, /source_kind=dsh/)
+    assert.match(res.body, /sess_1/)
+  } finally {
+    fakeFetch.restore()
+  }
+})
+
+
+test('preserves an upstream embed 404 as a typed capability failure', async () => {
+  const { routes, values } = setupBridge()
+  values.set('REVISO_DSH_TOKEN', 'rak_embed')
+  values.set('REVISO_DSH_SERVER', 'https://reviso.work')
+  values.set('REVISO_DSH_WORKSPACE_ID', 'wsp_personal')
+  const fakeFetch = installFetch()
+  try {
+    const res = response()
+    const req = { url: '/plugins/reviso/embed-session', headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' }, method: 'POST', body: { document_id: 'doc_000000000001' } }
+    await routes.get('/plugins/reviso/embed-session')(req, res)
+    assert.equal(res.status, 404)
+    const payload = JSON.parse(res.body)
+    assert.equal(payload.status, 404)
+    assert.equal(payload.code, 'not_implemented')
+  } finally {
+    fakeFetch.restore()
+  }
+})
 
 test('runs the OAuth start/callback flow without exposing the token', async () => {
   const { routes, values } = setupBridge()
@@ -178,10 +219,12 @@ test('runs the OAuth start/callback flow without exposing the token', async () =
 
     const statusRes = response()
     await routes.get('/plugins/reviso/auth/status')(request('/plugins/reviso/auth/status'), statusRes)
+    assert.equal(JSON.parse(statusRes.body).capabilities.embed, 'unknown')
     assert.deepEqual(JSON.parse(statusRes.body), {
       connected: true,
       server: 'https://reviso.work',
       workspaceId: 'wsp_personal',
+      capabilities: { embed: 'unknown' },
     })
     assert.doesNotMatch(statusRes.body, /rak_oauth/)
 

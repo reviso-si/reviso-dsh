@@ -1,5 +1,6 @@
 import { defineStore, type EngineStoreHandle } from '@deepseek-ai/dsh-client-store'
-import { connectionStatus, dashboardDocuments } from './host.ts'
+import { connectionStatus, dashboardDocuments, type RevisoRow } from './host.ts'
+import { browserDocumentUrl } from './document.ts'
 
 export interface RevisoDoc {
   id: string
@@ -55,7 +56,7 @@ export async function loadDocs(engine: { actions: RevisoActions }): Promise<void
       engine.actions.setDocs('unconfigured', [], '')
       return
     }
-    const rows = await dashboardDocuments()
+    const rows = await dashboardDocuments(50, 'dsh')
     engine.actions.setDocs('live', rows.map(row => mapDoc(row, connection.server)), '')
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err)
