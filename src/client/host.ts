@@ -36,15 +36,29 @@ export async function connectionStatus(): Promise<RevisoConnectionStatus> {
   return await res.json() as RevisoConnectionStatus
 }
 
-export async function dashboardDocuments(limit = 50, sourceKind?: string): Promise<RevisoRow[]> {
-  const query = new URLSearchParams({ limit: String(limit) })
+export interface RevisoDocumentPage {
+  rows: RevisoRow[]
+  hasMore: boolean
+  nextOffset: number | null
+}
+
+export async function dashboardDocumentsPage(limit = 50, offset = 0, sourceKind?: string): Promise<RevisoDocumentPage> {
+  const query = new URLSearchParams({ limit: String(limit), offset: String(offset) })
   if (sourceKind !== undefined) query.set('source_kind', sourceKind)
   const res = await fetch(`/plugins/reviso/dashboard?${query}`, {
     headers: { Accept: 'application/json' },
   })
   if (!res.ok) throw new Error(`dashboard HTTP ${res.status}`)
-  const body = await res.json() as { reviews?: RevisoRow[] }
-  return Array.isArray(body.reviews) ? body.reviews : []
+  const body = await res.json() as { reviews?: RevisoRow[]; has_more?: boolean; next_offset?: number | null }
+  return {
+    rows: Array.isArray(body.reviews) ? body.reviews : [],
+    hasMore: body.has_more === true,
+    nextOffset: typeof body.next_offset === 'number' ? body.next_offset : null,
+  }
+}
+
+export async function dashboardDocuments(limit = 50, sourceKind?: string): Promise<RevisoRow[]> {
+  return (await dashboardDocumentsPage(limit, 0, sourceKind)).rows
 }
 
 export async function sessionDocuments(sessionId: string): Promise<RevisoRow[]> {

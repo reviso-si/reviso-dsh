@@ -115,7 +115,7 @@ function installFetch() {
       })
     }
     if (String(url).includes('/api/dashboard/documents?workspace_id=wsp_personal')) {
-      if (String(url).includes('source_kind=dsh')) return json(200, { reviews: [{ document_id: 'doc_1', title: 'Doc', source_session_id: 'sess_1' }] })
+      if (String(url).includes('source_kind=dsh')) return json(200, { reviews: [{ document_id: 'doc_1', title: 'Doc', source_session_id: 'sess_1' }], has_more: true, next_offset: 1 })
       return json(200, { reviews: [{ document_id: 'doc_1', title: 'Doc' }] })
     }
     return json(404, { error: 'not found' })
