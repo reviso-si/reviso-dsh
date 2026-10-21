@@ -41,6 +41,9 @@ export const zh = {
   'global.selectDoc': '选择一篇文档预览',
   'global.back': '返回列表',
   'global.session': '会话',
+  'global.showingLoaded': '已加载',
+  'global.loadMore': '加载更多',
+  'global.loadMoreError': '加载更多失败',
 } as const
 
 export type RevisoLocaleKey = keyof typeof zh
@@ -87,4 +90,7 @@ export const en: Record<RevisoLocaleKey, string> = {
   'global.selectDoc': 'Select a document to preview',
   'global.back': 'Back to list',
   'global.session': 'session',
+  'global.showingLoaded': 'Showing',
+  'global.loadMore': 'Load more',
+  'global.loadMoreError': 'Could not load more documents',
 }

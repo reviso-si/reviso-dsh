@@ -30,6 +30,7 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
   const [hasMore, setHasMore] = useState(false)
   const [nextOffset, setNextOffset] = useState<number | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [loadMoreError, setLoadMoreError] = useState('')
   const [message, setMessage] = useState('')
   const [query, setQuery] = useState('')
   const [sessionFilter, setSessionFilter] = useState('')
@@ -59,6 +60,7 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
         setDocs(page.rows.map(row => mapRow(row, state.server)).filter((doc): doc is SessionDoc => doc !== null))
         setHasMore(page.hasMore)
         setNextOffset(page.nextOffset)
+        setLoadMoreError('')
         setStatus('live')
       } catch (error) {
         if (!alive) return
@@ -91,13 +93,14 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
   async function loadMore(): Promise<void> {
     if (!connection?.connected || nextOffset === null || loadingMore) return
     setLoadingMore(true)
+    setLoadMoreError('')
     try {
       const page = await dashboardDocumentsPage(50, nextOffset, 'dsh')
       setDocs(current => [...current, ...page.rows.map(row => mapRow(row, connection.server)).filter((doc): doc is SessionDoc => doc !== null)])
       setHasMore(page.hasMore)
       setNextOffset(page.nextOffset)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error))
+      setLoadMoreError(error instanceof Error ? error.message : String(error))
     } finally {
       setLoadingMore(false)
     }
@@ -174,7 +177,7 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
           {status === 'unconfigured' && <div className='rs-global-empty'><strong>{t('empty.unconfigured.title')}</strong><p>{t('empty.unconfigured.body')}</p><button type='button' className='rs-primary' onClick={startRevisoOAuth}>{t('action.connect')}</button></div>}
           {status === 'loading' && <div className='rs-global-empty'>{t('global.loading')}</div>}
           {status === 'live' && visibleDocs.length === 0 && <div className='rs-global-empty'>{docs.length === 0 ? t('global.empty') : t('global.noMatches')}</div>}
-          {status === 'live' && visibleDocs.length > 0 && hasMore && <div className='rs-global-row-meta' style={{padding:'8px 9px'}}>Showing {docs.length} loaded documents</div>}
+          {status === 'live' && visibleDocs.length > 0 && hasMore && <div className='rs-global-row-meta' style={{padding:'8px 9px'}}>{t('global.showingLoaded')} {docs.length}</div>}
           {status === 'live' && visibleDocs.map(doc => (
             <button type='button' className='rs-global-row' data-active={activeId === doc.id} role='listitem' key={doc.id} onClick={() => openDoc(doc)}>
               <FileIcon kind={doc.kind} />
@@ -185,7 +188,8 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
               </span>
             </button>
           ))}
-          {status === 'live' && hasMore && <button type='button' className='rs-text-btn' disabled={loadingMore} onClick={() => { void loadMore() }} style={{margin:'8px'}}>{loadingMore ? t('status.loading') : 'Load more'}</button>}
+          {loadMoreError !== '' && <div className='rs-global-error' style={{margin:'8px'}}><span>{t('global.loadMoreError')}: {loadMoreError}</span><button type='button' className='rs-text-btn' onClick={() => { void loadMore() }}>{t('action.retry')}</button></div>}
+          {status === 'live' && hasMore && <button type='button' className='rs-text-btn' disabled={loadingMore} onClick={() => { void loadMore() }} style={{margin:'8px'}}>{loadingMore ? t('status.loading') : t('global.loadMore')}</button>}
         </div>
         <div className='rs-global-reader'>
           {active === undefined ? <div className='rs-global-empty'>{t('global.selectDoc')}</div> : <>
