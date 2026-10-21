@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { connectionStatus, dashboardDocuments, documentContent, embedSession, onRevisoConnected, startRevisoOAuth, RevisoHttpError, type RevisoConnectionStatus, type RevisoDocumentContent } from './host.ts'
-import { mapRow, type SessionDoc } from './document.ts'
+import { mapRow, sameOrigin, type SessionDoc } from './document.ts'
 import { FileIcon } from './SessionView.tsx'
 import { zh, type RevisoLocaleKey } from './locales.ts'
 import { ensureStyles } from './readerStyles.ts'
@@ -71,14 +71,16 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
       const data = event.data as { type?: string; documentId?: string } | null
       if (data?.type !== 'reviso:error' && data?.type !== 'reviso:expired') return
       const documentId = data.documentId || ''
+      const embed = embeds[documentId]
       if (iframeRefs.current.get(documentId)?.contentWindow !== event.source) return
+      if (embed?.status !== 'live' || !sameOrigin(embed.url, event.origin)) return
       setEmbeds(current => current[documentId]?.status === 'live'
         ? { ...current, [documentId]: { status: 'error', message: t('doc.error') } }
         : current)
     }
     window.addEventListener('message', listener)
     return () => window.removeEventListener('message', listener)
-  }, [t])
+  }, [embeds, t])
 
   const sessions = useMemo(() => {
     const values = new Map<string, number>()

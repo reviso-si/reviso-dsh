@@ -36,3 +36,12 @@ export function mapRow(row: RevisoRow, server: string): SessionDoc | null {
     ...(row.source_session_id !== undefined ? { sessionId: row.source_session_id } : {}),
   }
 }
+
+export function sameOrigin(value: string | undefined, origin: string): boolean {
+  if (value === undefined || origin === '') return false
+  try {
+    return new URL(value).origin === origin
+  } catch {
+    return false
+  }
+}

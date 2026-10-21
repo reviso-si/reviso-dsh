@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 type RevisoStatus = 'unconfigured' | 'loading' | 'live' | 'error'
-import { mapRow, type SessionDoc } from './document.ts'
+import { mapRow, sameOrigin, type SessionDoc } from './document.ts'
 import { zh, type RevisoLocaleKey } from './locales.ts'
 import {
   connectionStatus, documentContent, embedSession, onRevisoConnected, sessionDocuments, startRevisoOAuth,
@@ -33,15 +33,6 @@ function preferredTheme(): 'light' | 'dark' | 'system' {
   const selected = document.documentElement.dataset.theme
   if (selected === 'light' || selected === 'dark') return selected
   return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
-
-function sameOrigin(value: string | undefined, origin: string): boolean {
-  if (value === undefined || origin === '') return false
-  try {
-    return new URL(value).origin === origin
-  } catch {
-    return false
-  }
 }
 
 import { CSS, ensureStyles } from './readerStyles.ts'
