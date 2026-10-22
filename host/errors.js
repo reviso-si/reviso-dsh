@@ -1,20 +1,23 @@
 const SECRET_PATTERNS = [
   /\bBearer\s+[^\s,;]+/giu,
-  /\b(?:rak|rft|rem_code)_[A-Za-z0-9._~-]+/gu,
+  /\b(?:rak|rft|rem_code|rem_token)_[A-Za-z0-9._~-]+/gu,
   /(["']?(?:access_token|refresh_token|authorization|token|code)["']?\s*[:=]\s*["']?)[^"'\s,}]+/giu,
 ]
+
+const ERROR_CLASSES = new Set([
+  'not_connected', 'auth_expired', 'forbidden', 'not_found',
+  'conflict', 'unavailable', 'unsupported',
+])
 
 export class RevisoApiError extends Error {
   constructor(status, message, options = {}) {
     super(redactSecrets(message))
     this.name = 'RevisoApiError'
     this.status = Number.isInteger(status) ? status : 502
-    this.code = typeof options.code === 'string' && options.code !== ''
-      ? options.code
-      : defaultCode(this.status)
+    this.code = normalizeCode(options.code, this.status, message)
     this.retryable = typeof options.retryable === 'boolean'
       ? options.retryable
-      : defaultRetryable(this.status)
+      : defaultRetryable(this.code, this.status)
     if (typeof options.requestId === 'string' && options.requestId !== '') {
       this.requestId = options.requestId
     }
@@ -46,7 +49,7 @@ export function errorFromResponse(status, text) {
 
 export function apiErrorPayload(error) {
   const value = error instanceof RevisoApiError ? error : new RevisoApiError(502, messageOf(error), {
-    code: 'request_failed',
+    code: 'unavailable',
   })
   return {
     error: value.message,
@@ -68,6 +71,25 @@ export function redactSecrets(value) {
 
 export function messageOf(error) {
   return redactSecrets(error instanceof Error ? error.message : String(error))
+}
+
+function normalizeCode(code, status, message) {
+  if (ERROR_CLASSES.has(code)) return code
+  if (typeof code === 'string') {
+    if (/AUTH_REQUIRED|NOT_CONNECTED|credential/i.test(code)) return 'not_connected'
+    if (/TOKEN_EXPIRED|AUTH_EXPIRED|unauthorized/i.test(code) || status === 401) return 'auth_expired'
+    if (/FORBIDDEN|PERMISSION/i.test(code) || status === 403) return 'forbidden'
+    if (/NOT_FOUND/i.test(code) || status === 404) return 'not_found'
+    if (/CONFLICT|STALE|CAS_/i.test(code) || status === 409) return 'conflict'
+    if (/UNSUPPORTED|NOT_IMPLEMENTED/i.test(code) || status === 405) return 'unsupported'
+  }
+  if (/not connected|credential/i.test(String(message))) return 'not_connected'
+  if (status === 401) return 'auth_expired'
+  if (status === 403) return 'forbidden'
+  if (status === 404) return 'not_found'
+  if (status === 409) return 'conflict'
+  if (status === 405) return 'unsupported'
+  return status >= 500 || status === 0 ? 'unavailable' : 'forbidden'
 }
 
 function redactValue(value) {
@@ -96,16 +118,6 @@ function booleanValue(...values) {
   return undefined
 }
 
-function defaultCode(status) {
-  if (status === 400) return 'invalid_request'
-  if (status === 401) return 'unauthorized'
-  if (status === 403) return 'forbidden'
-  if (status === 404) return 'not_found'
-  if (status === 409) return 'conflict'
-  if (status === 429) return 'rate_limited'
-  return status >= 500 ? 'upstream_unavailable' : 'request_failed'
-}
-
-function defaultRetryable(status) {
-  return status === 408 || status === 425 || status === 429 || status >= 500
+function defaultRetryable(code, status) {
+  return code === 'unavailable' && (status === 408 || status === 425 || status === 429 || status >= 500 || status === 0)
 }

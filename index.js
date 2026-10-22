@@ -151,6 +151,7 @@ function revisoPublishTool(ctx) {
           content: args.content,
           base_version_id: baseVersionId,
           description: args.description || 'Published from DeepSeek Harness',
+          operation_id: operationId,
         }
         if (args.source_format !== undefined) body.source_format = args.source_format
         const response = await postUpdate(ctx, credential, documentId, body, exec?.signal, operationId)
@@ -174,6 +175,7 @@ function revisoPublishTool(ctx) {
         workspace_id: credential.workspaceId,
         source_kind: 'dsh',
         source_session_id: sessionId,
+        operation_id: operationId,
       }
       if (args.document_kind !== undefined) body.document_kind = args.document_kind
       if (args.deck_contract_version !== undefined) {
@@ -302,7 +304,7 @@ function publishOperationId(exec, args, sessionId) {
   const replay = typeof exec?.callId === 'string' && exec.callId !== ''
     ? exec.callId
     : `${sessionId}:${args.document_id || ''}:${args.base_version_id || ''}:${args.title || ''}:${args.content || ''}`
-  return `reviso_dsh_${createHash('sha256').update(replay).digest('hex').slice(0, 40)}`
+  return `op_${createHash('sha256').update(replay).digest('hex').slice(0, 40)}`
 }
 
 function canonicalReviewUrl(server, documentId, explicit) {
@@ -312,7 +314,7 @@ function canonicalReviewUrl(server, documentId, explicit) {
       const candidate = new URL(explicit, `${server}/`)
       const expectedOrigin = new URL(server).origin
       if (candidate.origin !== expectedOrigin) throw new Error('origin mismatch')
-      return candidate.toString()
+      return explicit
     } catch {
       throw new Error('Reviso publish response had an invalid review_url')
     }

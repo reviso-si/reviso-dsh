@@ -150,7 +150,7 @@ test('publishes with credential refs and binds the agent session', async () => {
 
   assert.deepEqual(result, {
     document_id: 'doc_123',
-    review_url: `${baseUrl}/documents/doc_123`,
+    review_url: '/documents/doc_123',
     workspace_id: 'wsp_personal',
     updated: false,
     version_id: 'ver_created',
@@ -169,7 +169,9 @@ test('publishes with credential refs and binds the agent session', async () => {
     workspace_id: 'wsp_personal',
     source_kind: 'dsh',
     source_session_id: 'sess_123',
+    operation_id: captured[1].body.operation_id,
   })
+  assert.match(captured[1].body.operation_id, /^op_/);
 })
 
 test('refuses to publish outside an agent session', async () => {
@@ -363,6 +365,7 @@ test('updates an existing document without create-only fields or a default sourc
   updateStatus = 201
   updateResponse = {
     document_id: 'doc_123',
+    review_url: `${baseUrl}/documents/doc_123`,
     version_id: 'ver_updated',
     workspace_id: 'wsp_personal',
   }
@@ -396,7 +399,9 @@ test('updates an existing document without create-only fields or a default sourc
     content: '# Revised',
     base_version_id: 'ver_1',
     description: 'Published from DeepSeek Harness',
+    operation_id: captured[2].body.operation_id,
   })
+  assert.match(captured[2].body.operation_id, /^op_/)
   assert.equal(Object.hasOwn(captured[2].body, 'deck_contract_version'), false)
 })
 
@@ -420,7 +425,9 @@ test('update preserves an explicit source format', async () => {
     base_version_id: 'ver_1',
     description: 'Fresh HTML',
     source_format: 'html',
+    operation_id: update.body.operation_id,
   })
+  assert.match(update.body.operation_id, /^op_/)
 })
 
 test('rejects deck contract updates for a non-deck document before POST', async () => {

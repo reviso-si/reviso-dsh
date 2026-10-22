@@ -96,6 +96,9 @@ function installFetch() {
     if (String(url).includes('/api/agent/connections/con_1/revoke')) {
       return json(200, { connection: { id: 'con_1', active: false } })
     }
+    if (String(url).endsWith('/api/embed/v1/sessions/ems_abcdef123456/revoke')) {
+      return json(200, { session_id: 'ems_abcdef123456', revoked: true })
+    }
     if (String(url).includes('/api/documents?session_key=dsh:sess_1')) {
       return json(200, { documents: [{ document_id: 'doc_1', title: 'Doc' }] })
     }
@@ -172,6 +175,60 @@ test('preserves an upstream embed 404 as a typed capability failure', async () =
   } finally {
     fakeFetch.restore()
   }
+})
+
+test('Connect starts as a top-level GET with authenticated peer admission', async () => {
+  const { routes } = setupBridge()
+  const fakeFetch = installFetch()
+  try {
+    const res = response()
+    await routes.get('/plugins/reviso/auth/start')(request('/plugins/reviso/auth/start'), res)
+    assert.equal(res.status, 302)
+    assert.match(res.headers.Location, /^https:\/\/reviso\.work\/oauth\/authorize/)
+  } finally { fakeFetch.restore() }
+})
+
+test('host origin remains DSH while iframe origin is independently validated', async () => {
+  const previous = process.env.REVISO_DSH_EMBED_ORIGIN
+  process.env.REVISO_DSH_EMBED_ORIGIN = 'https://reviso-api.fly.dev'
+  const { routes, values } = setupBridge()
+  values.set('REVISO_DSH_TOKEN', 'rak_embed')
+  values.set('REVISO_DSH_SERVER', 'https://reviso.work')
+  values.set('REVISO_DSH_WORKSPACE_ID', 'wsp_personal')
+  const fakeFetch = installFetch()
+  try {
+    const res = response()
+    await routes.get('/plugins/reviso/embed-session')({
+      url: '/plugins/reviso/embed-session', method: 'POST',
+      headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-reviso-dsh-request': '1' },
+      body: { document_id: 'doc_abcdef123456' }, socket: { remoteAddress: '127.0.0.1' },
+    }, res)
+    assert.equal(res.status, 200, res.body)
+    const call = fakeFetch.calls.find(row => row.url.endsWith('/api/embed/v1/documents/doc_abcdef123456/sessions'))
+    assert.equal(JSON.parse(call.options.body).origin, 'http://127.0.0.1:3080')
+  } finally {
+    fakeFetch.restore()
+    if (previous === undefined) delete process.env.REVISO_DSH_EMBED_ORIGIN
+    else process.env.REVISO_DSH_EMBED_ORIGIN = previous
+  }
+})
+
+test('revokes an embed session through the authenticated host route', async () => {
+  const { routes, values } = setupBridge()
+  values.set('REVISO_DSH_TOKEN', 'rak_embed')
+  values.set('REVISO_DSH_SERVER', 'https://reviso.work')
+  values.set('REVISO_DSH_WORKSPACE_ID', 'wsp_personal')
+  const fakeFetch = installFetch()
+  try {
+    const res = response()
+    await routes.get('/plugins/reviso/embed-session/revoke')({
+      url: '/plugins/reviso/embed-session/revoke', method: 'POST',
+      headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-reviso-dsh-request': '1' },
+      body: { session_id: 'ems_abcdef123456' }, socket: { remoteAddress: '127.0.0.1' },
+    }, res)
+    assert.equal(res.status, 200, res.body)
+    assert.ok(fakeFetch.calls.some(call => call.url.endsWith('/api/embed/v1/sessions/ems_abcdef123456/revoke')))
+  } finally { fakeFetch.restore() }
 })
 
 test('runs the OAuth start/callback flow without exposing the token', async () => {
@@ -271,7 +328,7 @@ test('runs the OAuth start/callback flow without exposing the token', async () =
     assert.equal(embedCall.options.method, 'POST')
     assert.deepEqual(JSON.parse(embedCall.options.body), {
       host: 'dsh',
-      origin: 'https://reviso-api.fly.dev',
+      origin: 'http://127.0.0.1:3080',
       capabilities: ['read'],
       theme: 'dark',
       locale: 'zh-CN',

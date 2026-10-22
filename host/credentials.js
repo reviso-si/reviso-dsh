@@ -24,6 +24,15 @@ const REFRESH_SKEW_MS = 60_000
 const REQUEST_TIMEOUT_MS = 30_000
 const CLI_CREDENTIALS_LIMIT_BYTES = 1024 * 1024
 const refreshFlights = new Map()
+const credentialGenerations = new Map()
+
+function credentialKey(server, workspaceId, connectionId) {
+  return JSON.stringify([server, workspaceId, connectionId])
+}
+
+function bumpCredentialGeneration(key) {
+  credentialGenerations.set(key, (credentialGenerations.get(key) || 0) + 1)
+}
 
 export async function readCredential(ctx, { forceRefresh = false } = {}) {
   let token = await optionalRef(ctx, TOKEN_REF)
@@ -68,6 +77,7 @@ export async function readCredential(ctx, { forceRefresh = false } = {}) {
 
 export async function refreshCredential(ctx, {
   server, workspaceId = '', connectionId = '', refreshToken, clientId,
+  allowMissingStored = false,
 }) {
   if (refreshToken === '') {
     throw new Error('Reviso access token expired and no refresh token is stored')
@@ -77,8 +87,10 @@ export async function refreshCredential(ctx, {
   const existing = refreshFlights.get(flightKey)
   if (existing !== undefined) return existing.promise
 
+  const generation = credentialGenerations.get(flightKey) || 0
   const promise = performRefresh(ctx, {
-    server: normalizedServer, refreshToken, clientId,
+    server: normalizedServer, refreshToken, clientId, flightKey, generation,
+    allowMissingStored,
   }).finally(() => {
     if (refreshFlights.get(flightKey)?.promise === promise) refreshFlights.delete(flightKey)
   })
@@ -86,7 +98,7 @@ export async function refreshCredential(ctx, {
   return promise
 }
 
-async function performRefresh(ctx, { server, refreshToken, clientId }) {
+async function performRefresh(ctx, { server, refreshToken, clientId, flightKey, generation, allowMissingStored = false }) {
   const body = new URLSearchParams({
     grant_type: 'refresh_token',
     refresh_token: refreshToken,
@@ -104,8 +116,11 @@ async function performRefresh(ctx, { server, refreshToken, clientId }) {
 
   // Refresh-token rotation is a generation check: a concurrent refresh may
   // have committed a newer token while this request was in flight.
+  if ((credentialGenerations.get(flightKey) || 0) !== generation) {
+    throw new Error('Reviso credential changed during refresh; refresh discarded')
+  }
   const storedRefresh = await optionalRef(ctx, REFRESH_REF)
-  if (storedRefresh !== '' && storedRefresh !== refreshToken) {
+  if (storedRefresh !== refreshToken && !(allowMissingStored && storedRefresh === '')) {
     return {
       token: await optionalRef(ctx, TOKEN_REF),
       refreshToken: storedRefresh,
@@ -144,6 +159,10 @@ export async function storeCredential(ctx, values) {
 }
 
 export async function clearCredential(ctx) {
+  const server = normalizeServer(await optionalRef(ctx, SERVER_REF))
+  const workspaceId = await optionalRef(ctx, WORKSPACE_REF)
+  const connectionId = await optionalRef(ctx, CONNECTION_REF)
+  if (server !== '') bumpCredentialGeneration(credentialKey(server, workspaceId, connectionId))
   for (const ref of [TOKEN_REF, WORKSPACE_REF, SERVER_REF, REFRESH_REF,
     EXPIRES_REF, CLIENT_REF, CONNECTION_REF]) {
     try {
@@ -230,6 +249,7 @@ async function readCliCredential(ctx, fallbackServer) {
       connectionId,
       refreshToken,
       clientId,
+      allowMissingStored: true,
     })
     token = refreshed.token
     refreshToken = refreshed.refreshToken
@@ -239,7 +259,7 @@ async function readCliCredential(ctx, fallbackServer) {
   const workspaceId = String(entry?.workspace_id || '')
     || await resolvePersonalWorkspace(server, token)
   if (connectionId === '') connectionId = await resolveConnectionId(server, token)
-  return {
+  const credential = {
     token,
     workspaceId,
     server,
@@ -248,6 +268,21 @@ async function readCliCredential(ctx, fallbackServer) {
     clientId,
     connectionId,
   }
+  if (expiresAt > 0 && refreshToken !== '') {
+    // Promote the complete credential set. Otherwise a rotated CLI refresh
+    // token would remain stale on disk and the next fallback would reuse a
+    // consumed token.
+    await storeCredential(ctx, {
+      [TOKEN_REF]: token,
+      [WORKSPACE_REF]: workspaceId,
+      [SERVER_REF]: server,
+      [REFRESH_REF]: refreshToken,
+      [EXPIRES_REF]: String(expiresAt),
+      [CLIENT_REF]: clientId,
+      [CONNECTION_REF]: connectionId,
+    })
+  }
+  return credential
 }
 
 async function readPrivateCredentialFile(path) {

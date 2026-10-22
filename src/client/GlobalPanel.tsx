@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   clearDashboardDocumentsCache, connectionStatus, dashboardDocumentsPage, documentContent,
-  embedSession, onRevisoConnected, setDashboardCacheScope, startRevisoOAuth, RevisoHttpError,
+  embedSession, onRevisoConnected, revokeEmbedSession, setDashboardCacheScope, startRevisoOAuth, RevisoHttpError,
   type RevisoConnectionStatus, type RevisoDocumentContent,
 } from './host.ts'
 import { mapRow, sameOrigin, type SessionDoc } from './document.ts'
@@ -13,7 +13,7 @@ interface GlobalPanelProps {
   t?: (key: RevisoLocaleKey) => string
 }
 
-type EmbedState = { status: 'loading' | 'live' | 'fallback' | 'error'; url?: string; content?: RevisoDocumentContent; message?: string }
+type EmbedState = { status: 'loading' | 'live' | 'fallback' | 'error'; url?: string; sessionId?: string; content?: RevisoDocumentContent; message?: string }
 type ViewMode = 'list' | 'card'
 type KindFilter = 'all' | 'document' | 'html_deck'
 type SortMode = 'recent' | 'title' | 'creator'
@@ -92,6 +92,17 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
   const iframeRefs = useRef(new Map<string, HTMLIFrameElement>())
   const [mobileView, setMobileView] = useState<'list' | 'reader'>('list')
 
+  function revokeEmbed(documentId: string): void {
+    const sessionId = embeds[documentId]?.sessionId
+    if (sessionId !== undefined) void revokeEmbedSession(sessionId).catch(() => {})
+  }
+
+  useEffect(() => () => {
+    for (const embed of Object.values(embeds)) {
+      if (embed.sessionId !== undefined) void revokeEmbedSession(embed.sessionId).catch(() => {})
+    }
+  }, [])
+
   useEffect(() => {
     let alive = true
     const load = async () => {
@@ -102,6 +113,9 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
         if (!alive) return
         setConnection(state)
         if (setDashboardCacheScope(state)) {
+          for (const embed of Object.values(embeds)) {
+            if (embed.sessionId !== undefined) void revokeEmbedSession(embed.sessionId).catch(() => {})
+          }
           setActiveId(null)
           setEmbeds({})
           iframeRefs.current.clear()
@@ -193,12 +207,13 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
   const active = activeId === null ? undefined : docs.find(doc => doc.id === activeId)
 
   function openDoc(doc: SessionDoc): void {
+    if (activeId !== null && activeId !== doc.id) revokeEmbed(activeId)
     setActiveId(doc.id)
     setMobileView('reader')
     if (embeds[doc.id]?.status === 'live' || embeds[doc.id]?.status === 'loading') return
     setEmbeds(current => ({ ...current, [doc.id]: { status: 'loading' } }))
     void embedSession(doc.id, 'system')
-      .then(data => setEmbeds(current => ({ ...current, [doc.id]: { status: 'live', url: data.embed_url } })))
+      .then(data => setEmbeds(current => ({ ...current, [doc.id]: { status: 'live', url: data.embed_url, sessionId: data.session_id } })))
       .catch(async error => {
         if (error instanceof RevisoHttpError && (error.status === 404 || error.status === 501)) {
           try {

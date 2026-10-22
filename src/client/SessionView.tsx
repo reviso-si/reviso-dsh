@@ -3,7 +3,7 @@ type RevisoStatus = 'unconfigured' | 'loading' | 'live' | 'error'
 import { mapRow, sameOrigin, type SessionDoc } from './document.ts'
 import { zh, type RevisoLocaleKey } from './locales.ts'
 import {
-  connectionStatus, documentContent, embedSession, onRevisoConnected, sessionDocuments, startRevisoOAuth,
+  connectionStatus, documentContent, embedSession, onRevisoConnected, revokeEmbedSession, sessionDocuments, startRevisoOAuth,
   RevisoHttpError, type RevisoDocumentContent, type RevisoRow,
 } from './host.ts'
 
@@ -104,7 +104,7 @@ export function RevisoSessionView(props: SessionViewProps) {
       .then(data => {
         setEmbeds(current => ({
           ...current,
-          [doc.id]: { status: 'live', url: data.embed_url },
+          [doc.id]: { status: 'live', url: data.embed_url, sessionId: data.session_id },
         }))
       })
       .catch(async (error: unknown) => {
@@ -132,6 +132,8 @@ export function RevisoSessionView(props: SessionViewProps) {
   }
 
   function closeDocument(docId: string): void {
+    const session = embeds[docId]?.sessionId
+    if (session !== undefined) void revokeEmbedSession(session).catch(() => {})
     setOpenDocs(current => current.filter(item => item.id !== docId))
     setActiveDocId(current => current === docId ? null : current)
     setEmbeds(current => {
@@ -150,11 +152,15 @@ export function RevisoSessionView(props: SessionViewProps) {
   const [embeds, setEmbeds] = useState<Record<string, {
     status: 'loading' | 'live' | 'fallback' | 'error'
     url?: string
+    sessionId?: string
     content?: RevisoDocumentContent
     message?: string
   }>>({})
 
   useEffect(() => {
+    for (const embed of Object.values(embeds)) {
+      if (embed.sessionId !== undefined) void revokeEmbedSession(embed.sessionId).catch(() => {})
+    }
     setOpenDocs([])
     setActiveDocId(null)
     setEmbeds({})

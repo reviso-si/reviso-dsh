@@ -73,6 +73,11 @@ export function createOAuthBridge(ctx, options = {}) {
     }),
     ctx.webServer.register({
       kind: 'exact',
+      path: '/plugins/reviso/embed-session/revoke',
+      handler: (req, res) => handleEmbedRevoke(ctx, req, res, admission),
+    }),
+    ctx.webServer.register({
+      kind: 'exact',
       path: '/plugins/reviso/dashboard',
       handler: (req, res) => handleDashboard(ctx, req, res, admission),
     }),
@@ -150,12 +155,13 @@ async function handleEmbedSession(ctx, req, res, admission) {
   try {
     const credential = await readCredential(ctx)
     const embedOrigin = resolveEmbedOrigin(credential.server)
+    const hostOrigin = requestOrigin(ctx, req)
     const result = await authenticatedPost(
       ctx,
       `/api/embed/v1/documents/${encodeURIComponent(documentId)}/sessions`,
       {
         host: 'dsh',
-        origin: embedOrigin,
+        origin: hostOrigin,
         capabilities: ['read'],
         theme: normalizeTheme(body.theme),
         locale: String(body.locale || 'en').slice(0, 24),
@@ -165,6 +171,28 @@ async function handleEmbedSession(ctx, req, res, admission) {
   } catch (error) {
     sendError(res, error)
   }
+}
+
+async function handleEmbedRevoke(ctx, req, res, admission) {
+  if (!requireAdmission(req, res, admission, { mutation: true })) return
+  if ((req.method || 'POST') !== 'POST') {
+    sendJson(res, 405, { error: 'method_not_allowed', code: 'unsupported', retryable: false })
+    return
+  }
+  let body
+  try { body = await readJsonRequest(req) } catch (error) {
+    sendJson(res, 400, apiErrorPayload(error))
+    return
+  }
+  const sessionId = String(body.session_id || '')
+  if (!/^ems_[0-9a-f]{12}$/u.test(sessionId)) {
+    sendJson(res, 400, { error: 'valid session_id required', code: 'unsupported', retryable: false, status: 400 })
+    return
+  }
+  try {
+    sendJson(res, 200, await authenticatedPost(
+      ctx, `/api/embed/v1/sessions/${encodeURIComponent(sessionId)}/revoke`, {}))
+  } catch (error) { sendError(res, error) }
 }
 
 async function handleDashboard(ctx, req, res, admission) {
@@ -188,7 +216,9 @@ async function handleDashboard(ctx, req, res, admission) {
 }
 
 async function handleStart(ctx, req, res, defaultServer, pending, clients, admission) {
-  if (!requireAdmission(req, res, admission, { mutation: true })) return
+  // window.open performs a top-level GET and cannot attach a custom header.
+  // The authenticated peer + consent screen remain the authorization boundary.
+  if (!requireAdmission(req, res, admission)) return
   try {
     const server = defaultServer
     const origin = callbackOrigin(ctx, req)
@@ -437,6 +467,17 @@ function challenge(verifier) {
 
 function base64url(buffer) {
   return Buffer.from(buffer).toString('base64url')
+}
+
+function requestOrigin(ctx, req) {
+  const origin = String(req.headers.origin || '')
+  if (origin !== '') {
+    const parsed = new URL(origin)
+    if ((parsed.protocol === 'http:' || parsed.protocol === 'https:')
+        && parsed.username === '' && parsed.password === '') return parsed.origin
+    throw new Error('valid browser origin required')
+  }
+  return callbackOrigin(ctx, req)
 }
 
 function callbackOrigin(ctx, req) {

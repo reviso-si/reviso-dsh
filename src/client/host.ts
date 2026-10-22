@@ -138,6 +138,20 @@ export async function documentContent(documentId: string): Promise<RevisoDocumen
   return await res.json() as RevisoDocumentContent
 }
 
+export async function revokeEmbedSession(sessionId: string): Promise<void> {
+  const res = await fetch('/plugins/reviso/embed-session/revoke', {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'X-Reviso-DSH-Request': '1',
+    },
+    credentials: 'same-origin',
+    body: JSON.stringify({ session_id: sessionId }),
+  })
+  if (!res.ok) throw await responseError(res, 'embed revoke')
+}
+
 export async function embedSession(
   documentId: string,
   theme: 'light' | 'dark' | 'system',
