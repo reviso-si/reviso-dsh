@@ -30,6 +30,10 @@ export interface RevisoDocumentContent {
   updated_at?: string
 }
 
+interface CacheEntry<T> { expiresAt: number; value?: T; pending?: Promise<T> }
+const pageCache = new Map<string, CacheEntry<RevisoDocumentPage>>()
+const PAGE_TTL_MS = 30_000
+
 export async function connectionStatus(): Promise<RevisoConnectionStatus> {
   const res = await fetch('/plugins/reviso/auth/status', { headers: { Accept: 'application/json' } })
   if (!res.ok) throw new Error(`status HTTP ${res.status}`)
@@ -45,16 +49,32 @@ export interface RevisoDocumentPage {
 export async function dashboardDocumentsPage(limit = 50, offset = 0, sourceKind?: string): Promise<RevisoDocumentPage> {
   const query = new URLSearchParams({ limit: String(limit), offset: String(offset) })
   if (sourceKind !== undefined) query.set('source_kind', sourceKind)
-  const res = await fetch(`/plugins/reviso/dashboard?${query}`, {
+  const key = query.toString()
+  const cached = pageCache.get(key)
+  if (cached?.value && cached.expiresAt > Date.now()) return cached.value
+  if (cached?.pending) return cached.pending
+  const pending = fetch(`/plugins/reviso/dashboard?${query}`, {
     headers: { Accept: 'application/json' },
+  }).then(async res => {
+    if (!res.ok) throw new Error(`dashboard HTTP ${res.status}`)
+    const body = await res.json() as { reviews?: RevisoRow[]; has_more?: boolean; next_offset?: number | null }
+    const value = {
+      rows: Array.isArray(body.reviews) ? body.reviews : [],
+      hasMore: body.has_more === true,
+      nextOffset: typeof body.next_offset === 'number' ? body.next_offset : null,
+    }
+    pageCache.set(key, { value, expiresAt: Date.now() + PAGE_TTL_MS })
+    return value
+  }).finally(() => {
+    const entry = pageCache.get(key)
+    if (entry?.pending === pending) delete entry.pending
   })
-  if (!res.ok) throw new Error(`dashboard HTTP ${res.status}`)
-  const body = await res.json() as { reviews?: RevisoRow[]; has_more?: boolean; next_offset?: number | null }
-  return {
-    rows: Array.isArray(body.reviews) ? body.reviews : [],
-    hasMore: body.has_more === true,
-    nextOffset: typeof body.next_offset === 'number' ? body.next_offset : null,
-  }
+  pageCache.set(key, { ...(cached || {}), pending, expiresAt: cached?.expiresAt || 0 })
+  return pending
+}
+
+export function clearDashboardDocumentsCache(): void {
+  pageCache.clear()
 }
 
 export async function dashboardDocuments(limit = 50, sourceKind?: string): Promise<RevisoRow[]> {

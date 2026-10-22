@@ -13,6 +13,18 @@ test('client manifest declares every runtime external and no retired runtime see
   assert.equal(bundle.includes('@deepseek-ai/dsh-client-store'), false)
 })
 
+test('global browser ships cache, source-session, and view-mode contracts', () => {
+  for (const marker of [
+    'clearDashboardDocumentsCache',
+    'reviso-dsh-global-view',
+    'All sessions',
+    'Card view',
+    'rs-global-card',
+    'rs-session-chip',
+    'sortCreator',
+  ]) assert.ok(bundle.includes(marker) || bundle.includes('global.sortCreator'), marker)
+})
+
 test('client factory materializes with only the declared DSH shell seeds', () => {
   let registration
   vm.runInNewContext(bundle, {
