@@ -32,6 +32,7 @@ function credentialKey(server, workspaceId, connectionId) {
 
 function bumpCredentialGeneration(key) {
   credentialGenerations.set(key, (credentialGenerations.get(key) || 0) + 1)
+  credentialGenerations.set('*', (credentialGenerations.get('*') || 0) + 1)
 }
 
 export async function readCredential(ctx, { forceRefresh = false } = {}) {
@@ -87,10 +88,11 @@ export async function refreshCredential(ctx, {
   const existing = refreshFlights.get(flightKey)
   if (existing !== undefined) return existing.promise
 
+  const globalGeneration = credentialGenerations.get('*') || 0
   const generation = credentialGenerations.get(flightKey) || 0
   const promise = performRefresh(ctx, {
     server: normalizedServer, refreshToken, clientId, flightKey, generation,
-    allowMissingStored,
+    globalGeneration, allowMissingStored,
   }).finally(() => {
     if (refreshFlights.get(flightKey)?.promise === promise) refreshFlights.delete(flightKey)
   })
@@ -98,7 +100,7 @@ export async function refreshCredential(ctx, {
   return promise
 }
 
-async function performRefresh(ctx, { server, refreshToken, clientId, flightKey, generation, allowMissingStored = false }) {
+async function performRefresh(ctx, { server, refreshToken, clientId, flightKey, generation, globalGeneration, allowMissingStored = false }) {
   const body = new URLSearchParams({
     grant_type: 'refresh_token',
     refresh_token: refreshToken,
@@ -116,7 +118,8 @@ async function performRefresh(ctx, { server, refreshToken, clientId, flightKey, 
 
   // Refresh-token rotation is a generation check: a concurrent refresh may
   // have committed a newer token while this request was in flight.
-  if ((credentialGenerations.get(flightKey) || 0) !== generation) {
+  if ((credentialGenerations.get(flightKey) || 0) !== generation
+      || (credentialGenerations.get('*') || 0) !== globalGeneration) {
     throw new Error('Reviso credential changed during refresh; refresh discarded')
   }
   const storedRefresh = await optionalRef(ctx, REFRESH_REF)
@@ -129,6 +132,10 @@ async function performRefresh(ctx, { server, refreshToken, clientId, flightKey, 
     }
   }
 
+  if ((credentialGenerations.get(flightKey) || 0) !== generation
+      || (credentialGenerations.get('*') || 0) !== globalGeneration) {
+    throw new Error('Reviso credential changed during refresh; refresh discarded')
+  }
   await storeCredential(ctx, {
     [TOKEN_REF]: token,
     [REFRESH_REF]: nextRefresh,
@@ -162,7 +169,7 @@ export async function clearCredential(ctx) {
   const server = normalizeServer(await optionalRef(ctx, SERVER_REF))
   const workspaceId = await optionalRef(ctx, WORKSPACE_REF)
   const connectionId = await optionalRef(ctx, CONNECTION_REF)
-  if (server !== '') bumpCredentialGeneration(credentialKey(server, workspaceId, connectionId))
+  bumpCredentialGeneration(server === '' ? '*' : credentialKey(server, workspaceId, connectionId))
   for (const ref of [TOKEN_REF, WORKSPACE_REF, SERVER_REF, REFRESH_REF,
     EXPIRES_REF, CLIENT_REF, CONNECTION_REF]) {
     try {

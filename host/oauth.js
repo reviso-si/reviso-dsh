@@ -470,14 +470,14 @@ function base64url(buffer) {
 }
 
 function requestOrigin(ctx, req) {
+  const expected = callbackOrigin(ctx, req)
   const origin = String(req.headers.origin || '')
-  if (origin !== '') {
-    const parsed = new URL(origin)
-    if ((parsed.protocol === 'http:' || parsed.protocol === 'https:')
-        && parsed.username === '' && parsed.password === '') return parsed.origin
-    throw new Error('valid browser origin required')
-  }
-  return callbackOrigin(ctx, req)
+  if (origin === '') return expected
+  const parsed = new URL(origin)
+  if ((parsed.protocol === 'http:' || parsed.protocol === 'https:')
+      && parsed.username === '' && parsed.password === ''
+      && parsed.origin === expected) return parsed.origin
+  throw new Error('browser origin does not match DSH origin')
 }
 
 function callbackOrigin(ctx, req) {
@@ -560,7 +560,7 @@ function requireAdmission(req, res, admit, { mutation = false } = {}) {
     if (value?.rejection !== undefined) {
       sendJson(res, value.rejection, {
         error: value.rejection === 401 ? 'authentication_required' : 'request_forbidden',
-        code: value.rejection === 401 ? 'unauthorized' : 'forbidden',
+        code: value.rejection === 401 ? 'auth_expired' : 'forbidden',
         retryable: false,
         status: value.rejection,
       })

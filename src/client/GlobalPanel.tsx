@@ -91,6 +91,12 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
   const [embeds, setEmbeds] = useState<Record<string, EmbedState>>({})
   const iframeRefs = useRef(new Map<string, HTMLIFrameElement>())
   const [mobileView, setMobileView] = useState<'list' | 'reader'>('list')
+  const embedSessions = useRef(new Set<string>())
+
+  useEffect(() => {
+    embedSessions.current = new Set(Object.values(embeds)
+      .map(embed => embed.sessionId).filter((id): id is string => id !== undefined))
+  }, [embeds])
 
   function revokeEmbed(documentId: string): void {
     const sessionId = embeds[documentId]?.sessionId
@@ -98,8 +104,8 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
   }
 
   useEffect(() => () => {
-    for (const embed of Object.values(embeds)) {
-      if (embed.sessionId !== undefined) void revokeEmbedSession(embed.sessionId).catch(() => {})
+    for (const sessionId of embedSessions.current) {
+      void revokeEmbedSession(sessionId).catch(() => {})
     }
   }, [])
 
@@ -113,8 +119,8 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
         if (!alive) return
         setConnection(state)
         if (setDashboardCacheScope(state)) {
-          for (const embed of Object.values(embeds)) {
-            if (embed.sessionId !== undefined) void revokeEmbedSession(embed.sessionId).catch(() => {})
+          for (const sessionId of embedSessions.current) {
+            void revokeEmbedSession(sessionId).catch(() => {})
           }
           setActiveId(null)
           setEmbeds({})
