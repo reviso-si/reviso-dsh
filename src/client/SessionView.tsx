@@ -38,14 +38,11 @@ function preferredTheme(): 'light' | 'dark' | 'system' {
 import { CSS, ensureStyles } from './readerStyles.ts'
 
 export function FileIcon({ kind }: { kind: 'document' | 'html_deck' | 'other' }) {
-  const path = kind === 'html_deck'
-    ? 'M3 3h8l2 2v14l-2-2H3V3zm10 2h5v13l-2.5-2L13 18V5z'
-    : 'M5 2h8l4 4v16H5V2zm8 1v3h3l-3-3zM7 9h8v1.5H7V9zm0 3h8v1.5H7V12zm0 3h6v1.5H7V12z'
   return (
     <span className='rs-doc-icon' data-kind={kind} aria-hidden>
-      <svg width='13' height='13' viewBox='0 0 24 24' fill='currentColor'>
-        <path d={path} />
-      </svg>
+      {kind === 'html_deck'
+        ? <svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='1.8' strokeLinecap='round' strokeLinejoin='round'><path d='M3 4h18v12H3z' /><path d='M8 20h8M12 16v4M8 8h8M8 11h5' /></svg>
+        : <svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='1.8' strokeLinecap='round' strokeLinejoin='round'><path d='M6 2h8l4 4v16H6z' /><path d='M14 2v5h4M9 11h6M9 15h6M9 19h4' /></svg>}
     </span>
   )
 }
