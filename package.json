@@ -22,6 +22,8 @@
   },
   "scripts": {
     "build:client": "tsdown && node scripts/wrap-client.mjs",
+    "check:packed": "node scripts/check-packed-tarball.mjs",
+    "prepack": "npm run build:client && npm run check:packed",
     "test": "node --test test/*.test.mjs",
     "verify:real": "node scripts/real-publish.mjs",
     "uxe:check": "python3 .uxe/scripts/check.py --project-root .",

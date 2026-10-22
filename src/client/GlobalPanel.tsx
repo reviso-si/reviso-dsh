@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   clearDashboardDocumentsCache, connectionStatus, dashboardDocumentsPage, documentContent,
-  embedSession, onRevisoConnected, startRevisoOAuth, RevisoHttpError,
+  embedSession, onRevisoConnected, setDashboardCacheScope, startRevisoOAuth, RevisoHttpError,
   type RevisoConnectionStatus, type RevisoDocumentContent,
 } from './host.ts'
 import { mapRow, sameOrigin, type SessionDoc } from './document.ts'
@@ -101,6 +101,11 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
         const state = await connectionStatus()
         if (!alive) return
         setConnection(state)
+        if (setDashboardCacheScope(state)) {
+          setActiveId(null)
+          setEmbeds({})
+          iframeRefs.current.clear()
+        }
         if (!state.connected) {
           setStatus('unconfigured')
           setDocs([])
@@ -298,7 +303,7 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
             </div>
             <div className='rs-global-reader-body'>
               {embeds[active.id]?.status === 'live' && embeds[active.id].url !== undefined
-                ? <iframe ref={node => { if (node === null) iframeRefs.current.delete(active.id); else iframeRefs.current.set(active.id, node) }} className='rs-embed-frame' title={active.title} src={embeds[active.id].url} sandbox='allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox' referrerPolicy='no-referrer' loading='eager' />
+                ? <iframe ref={node => { if (node === null) iframeRefs.current.delete(active.id); else iframeRefs.current.set(active.id, node) }} className='rs-embed-frame' title={active.title} src={embeds[active.id].url} sandbox='allow-scripts' allow='fullscreen' referrerPolicy='no-referrer' loading='eager' />
                 : embeds[active.id]?.status === 'fallback'
                   ? <div className='rs-reader'>{embeds[active.id].content?.content_html ? <iframe className='rs-html-frame' title={active.title} sandbox='' srcDoc={embeds[active.id].content?.content_html} /> : embeds[active.id].content?.content}</div>
                   : embeds[active.id]?.status === 'error'

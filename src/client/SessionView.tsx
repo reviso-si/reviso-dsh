@@ -155,6 +155,13 @@ export function RevisoSessionView(props: SessionViewProps) {
   }>>({})
 
   useEffect(() => {
+    setOpenDocs([])
+    setActiveDocId(null)
+    setEmbeds({})
+    iframeRefs.current.clear()
+  }, [sessionId])
+
+  useEffect(() => {
     if (sessionId === '') return
     let alive = true
     const load = async () => {
@@ -268,7 +275,8 @@ export function RevisoSessionView(props: SessionViewProps) {
                       }}
                       className='rs-embed-frame' title={doc.title}
                       src={embed.url}
-                      sandbox='allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox'
+                      sandbox='allow-scripts'
+                      allow='fullscreen'
                       referrerPolicy='no-referrer'
                       loading='eager' />
                   )

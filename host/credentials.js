@@ -6,9 +6,10 @@
  * The personal workspace comes from `/api/workspaces`, the token-compatible
  * membership endpoint, not from the connection metadata.
  */
-import { readFile } from 'node:fs/promises'
+import { open } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join, resolve } from 'node:path'
+import { errorFromResponse } from './errors.js'
 
 export const TOKEN_REF = 'REVISO_DSH_TOKEN'
 export const WORKSPACE_REF = 'REVISO_DSH_WORKSPACE_ID'
@@ -21,6 +22,8 @@ export const CONNECTION_REF = 'REVISO_DSH_CONNECTION_ID'
 const DEFAULT_SERVER = 'https://reviso.work'
 const REFRESH_SKEW_MS = 60_000
 const REQUEST_TIMEOUT_MS = 30_000
+const CLI_CREDENTIALS_LIMIT_BYTES = 1024 * 1024
+const refreshFlights = new Map()
 
 export async function readCredential(ctx, { forceRefresh = false } = {}) {
   let token = await optionalRef(ctx, TOKEN_REF)
@@ -35,7 +38,9 @@ export async function readCredential(ctx, { forceRefresh = false } = {}) {
     const shouldRefresh = refreshToken !== ''
       && (forceRefresh || (expiresAt > 0 && Date.now() >= expiresAt - REFRESH_SKEW_MS))
     if (shouldRefresh) {
-      const refreshed = await refreshCredential(ctx, { server, refreshToken, clientId })
+      const refreshed = await refreshCredential(ctx, {
+        server, workspaceId, connectionId, refreshToken, clientId,
+      })
       token = refreshed.token
       refreshToken = refreshed.refreshToken
       expiresAt = refreshed.expiresAt
@@ -61,10 +66,27 @@ export async function readCredential(ctx, { forceRefresh = false } = {}) {
   )
 }
 
-export async function refreshCredential(ctx, { server, refreshToken, clientId }) {
+export async function refreshCredential(ctx, {
+  server, workspaceId = '', connectionId = '', refreshToken, clientId,
+}) {
   if (refreshToken === '') {
     throw new Error('Reviso access token expired and no refresh token is stored')
   }
+  const normalizedServer = normalizeServer(server)
+  const flightKey = JSON.stringify([normalizedServer, workspaceId, connectionId])
+  const existing = refreshFlights.get(flightKey)
+  if (existing !== undefined) return existing.promise
+
+  const promise = performRefresh(ctx, {
+    server: normalizedServer, refreshToken, clientId,
+  }).finally(() => {
+    if (refreshFlights.get(flightKey)?.promise === promise) refreshFlights.delete(flightKey)
+  })
+  refreshFlights.set(flightKey, { refreshToken, promise })
+  return promise
+}
+
+async function performRefresh(ctx, { server, refreshToken, clientId }) {
   const body = new URLSearchParams({
     grant_type: 'refresh_token',
     refresh_token: refreshToken,
@@ -79,6 +101,19 @@ export async function refreshCredential(ctx, { server, refreshToken, clientId })
   const connectionId = String(data.connection?.id || '')
     || await resolveConnectionId(server, token)
   if (connectionId === '') throw new Error('Reviso refresh response had no connection id')
+
+  // Refresh-token rotation is a generation check: a concurrent refresh may
+  // have committed a newer token while this request was in flight.
+  const storedRefresh = await optionalRef(ctx, REFRESH_REF)
+  if (storedRefresh !== '' && storedRefresh !== refreshToken) {
+    return {
+      token: await optionalRef(ctx, TOKEN_REF),
+      refreshToken: storedRefresh,
+      expiresAt: normalizeExpiry(await optionalRef(ctx, EXPIRES_REF)),
+      connectionId: await optionalRef(ctx, CONNECTION_REF),
+    }
+  }
+
   await storeCredential(ctx, {
     [TOKEN_REF]: token,
     [REFRESH_REF]: nextRefresh,
@@ -145,7 +180,15 @@ export async function optionalRef(ctx, ref) {
 }
 
 export function normalizeServer(value) {
-  return String(value || '').replace(/\/+$/, '')
+  const text = String(value || '').replace(/\/+$/, '')
+  if (text === '') return ''
+  let url
+  try { url = new URL(text) } catch { return '' }
+  if (url.username !== '' || url.password !== '') return ''
+  if (url.pathname !== '/' || url.search !== '' || url.hash !== '') return ''
+  if (url.protocol === 'https:') return url.origin
+  if (url.protocol === 'http:' && isLoopbackHostname(url.hostname)) return url.origin
+  return ''
 }
 
 export function expiryFrom(tokenResponse) {
@@ -161,15 +204,18 @@ export function normalizeExpiry(value) {
 }
 
 async function readCliCredential(ctx, fallbackServer) {
-  const path = process.env.REVISO_DSH_CLI_CREDENTIALS
+  const configured = process.env.REVISO_DSH_CLI_CREDENTIALS
     || join(process.env.REVISO_CONFIG_DIR || join(homedir(), '.config', 'reviso'), 'credentials.json')
+  const path = isAbsolute(configured) ? configured : resolve(configured)
   let document
   try {
-    document = JSON.parse(await readFile(path, 'utf8'))
-  } catch {
+    document = JSON.parse(await readPrivateCredentialFile(path))
+  } catch (error) {
+    console.warn('[reviso-dsh] ignoring unsafe CLI credential fallback:', error instanceof Error ? error.message : error)
     return undefined
   }
   const server = normalizeServer(fallbackServer || String(document.server || DEFAULT_SERVER))
+  if (server === '') return undefined
   const entry = document?.servers?.[server]
   let token = String(entry?.access_token || '')
   if (token === '') return undefined
@@ -178,7 +224,13 @@ async function readCliCredential(ctx, fallbackServer) {
   let expiresAt = normalizeExpiry(entry?.expires_at)
   let connectionId = String(entry?.connection_id || '')
   if (expiresAt > 0 && Date.now() >= expiresAt - REFRESH_SKEW_MS && refreshToken !== '') {
-    const refreshed = await refreshCredential(ctx, { server, refreshToken, clientId })
+    const refreshed = await refreshCredential(ctx, {
+      server,
+      workspaceId: String(entry?.workspace_id || ''),
+      connectionId,
+      refreshToken,
+      clientId,
+    })
     token = refreshed.token
     refreshToken = refreshed.refreshToken
     expiresAt = refreshed.expiresAt
@@ -198,15 +250,38 @@ async function readCliCredential(ctx, fallbackServer) {
   }
 }
 
+async function readPrivateCredentialFile(path) {
+  const handle = await open(path, 'r')
+  try {
+    const info = await handle.stat()
+    if (!info.isFile()) throw new Error('credential fallback is not a regular file')
+    if (info.size <= 0 || info.size > CLI_CREDENTIALS_LIMIT_BYTES) {
+      throw new Error('credential fallback size is outside the accepted range')
+    }
+    if (typeof process.getuid === 'function' && info.uid !== process.getuid()) {
+      throw new Error('credential fallback is owned by another user')
+    }
+    if (process.platform !== 'win32' && (info.mode & 0o077) !== 0) {
+      throw new Error('credential fallback permissions must be 0600 or stricter')
+    }
+    return await handle.readFile('utf8')
+  } finally {
+    await handle.close()
+  }
+}
+
+function isLoopbackHostname(hostname) {
+  const value = hostname.toLowerCase()
+  return value === 'localhost' || value === '::1' || value === '[::1]' || /^127(?:\.\d{1,3}){3}$/u.test(value)
+}
+
 async function revisoGet(server, path, token) {
   const response = await fetch(`${server}${path}`, {
     headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   })
   const text = await response.text()
-  if (!response.ok) {
-    throw new Error(`Reviso read failed (HTTP ${response.status}): ${text.slice(0, 300)}`)
-  }
+  if (!response.ok) throw errorFromResponse(response.status, text)
   return JSON.parse(text)
 }
 
@@ -221,8 +296,6 @@ async function oauthToken(server, body) {
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   })
   const text = await response.text()
-  if (!response.ok) {
-    throw new Error(`Reviso token refresh failed (HTTP ${response.status}): ${text.slice(0, 200)}`)
-  }
+  if (!response.ok) throw errorFromResponse(response.status, text)
   return JSON.parse(text)
 }

@@ -3,6 +3,8 @@ export interface RevisoConnectionStatus {
   connected: boolean
   server: string
   workspaceId: string
+  generation?: number
+  capabilities?: { embed?: string; embedOrigin?: string }
 }
 
 export interface RevisoRow {
@@ -33,11 +35,23 @@ export interface RevisoDocumentContent {
 interface CacheEntry<T> { expiresAt: number; value?: T; pending?: Promise<T> }
 const pageCache = new Map<string, CacheEntry<RevisoDocumentPage>>()
 const PAGE_TTL_MS = 30_000
+let cacheScope = 'unknown|unknown|0'
 
 export async function connectionStatus(): Promise<RevisoConnectionStatus> {
-  const res = await fetch('/plugins/reviso/auth/status', { headers: { Accept: 'application/json' } })
-  if (!res.ok) throw new Error(`status HTTP ${res.status}`)
+  const res = await fetch('/plugins/reviso/auth/status', {
+    headers: { Accept: 'application/json' },
+    credentials: 'same-origin',
+  })
+  if (!res.ok) throw await responseError(res, 'status')
   return await res.json() as RevisoConnectionStatus
+}
+
+export function setDashboardCacheScope(connection: RevisoConnectionStatus): boolean {
+  const next = `${connection.server}|${connection.workspaceId}|${String(connection.generation ?? 0)}`
+  if (next === cacheScope) return false
+  cacheScope = next
+  pageCache.clear()
+  return true
 }
 
 export interface RevisoDocumentPage {
@@ -49,14 +63,15 @@ export interface RevisoDocumentPage {
 export async function dashboardDocumentsPage(limit = 50, offset = 0, sourceKind?: string): Promise<RevisoDocumentPage> {
   const query = new URLSearchParams({ limit: String(limit), offset: String(offset) })
   if (sourceKind !== undefined) query.set('source_kind', sourceKind)
-  const key = query.toString()
+  const key = `${cacheScope}|${query.toString()}`
   const cached = pageCache.get(key)
   if (cached?.value && cached.expiresAt > Date.now()) return cached.value
   if (cached?.pending) return cached.pending
   const pending = fetch(`/plugins/reviso/dashboard?${query}`, {
     headers: { Accept: 'application/json' },
+    credentials: 'same-origin',
   }).then(async res => {
-    if (!res.ok) throw new Error(`dashboard HTTP ${res.status}`)
+    if (!res.ok) throw await responseError(res, 'dashboard')
     const body = await res.json() as { reviews?: RevisoRow[]; has_more?: boolean; next_offset?: number | null }
     const value = {
       rows: Array.isArray(body.reviews) ? body.reviews : [],
@@ -84,8 +99,9 @@ export async function dashboardDocuments(limit = 50, sourceKind?: string): Promi
 export async function sessionDocuments(sessionId: string): Promise<RevisoRow[]> {
   const res = await fetch(`/plugins/reviso/documents?session_id=${encodeURIComponent(sessionId)}`, {
     headers: { Accept: 'application/json' },
+    credentials: 'same-origin',
   })
-  if (!res.ok) throw new Error(`documents HTTP ${res.status}`)
+  if (!res.ok) throw await responseError(res, 'documents')
   const body = await res.json() as { documents?: RevisoRow[] }
   return Array.isArray(body.documents) ? body.documents : []
 }
@@ -100,18 +116,25 @@ export interface RevisoEmbedSession {
 }
 
 export class RevisoHttpError extends Error {
-  constructor(readonly status: number, message: string, readonly code = 'request_failed') {
+  constructor(
+    readonly status: number,
+    message: string,
+    readonly code = 'request_failed',
+    readonly retryable = status === 408 || status === 425 || status === 429 || status >= 500,
+    readonly requestId?: string,
+    readonly details?: unknown,
+  ) {
     super(message)
     this.name = 'RevisoHttpError'
   }
 }
 
 export async function documentContent(documentId: string): Promise<RevisoDocumentContent> {
-  const res = await fetch(`/plugins/reviso/document?id=${encodeURIComponent(documentId)}`, { headers: { Accept: 'application/json' } })
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({})) as { error?: string; code?: string }
-    throw new RevisoHttpError(res.status, body.error || `document HTTP ${res.status}`, body.code)
-  }
+  const res = await fetch(`/plugins/reviso/document?id=${encodeURIComponent(documentId)}`, {
+    headers: { Accept: 'application/json' },
+    credentials: 'same-origin',
+  })
+  if (!res.ok) throw await responseError(res, 'document')
   return await res.json() as RevisoDocumentContent
 }
 
@@ -121,14 +144,40 @@ export async function embedSession(
 ): Promise<RevisoEmbedSession> {
   const res = await fetch('/plugins/reviso/embed-session', {
     method: 'POST',
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'X-Reviso-DSH-Request': '1',
+    },
+    credentials: 'same-origin',
     body: JSON.stringify({ document_id: documentId, theme, locale: navigator.language }),
   })
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({})) as { error?: string; code?: string }
-    throw new RevisoHttpError(res.status, body.error || `embed session HTTP ${res.status}`, body.code)
+  if (!res.ok) throw await responseError(res, 'embed session')
+  const body = await res.json() as RevisoEmbedSession
+  validateEmbedUrl(body.embed_url)
+  return body
+}
+
+async function responseError(res: Response, fallback: string): Promise<RevisoHttpError> {
+  const body = await res.json().catch(() => ({})) as {
+    error?: string; code?: string; retryable?: boolean; request_id?: string; details?: unknown
   }
-  return await res.json() as RevisoEmbedSession
+  return new RevisoHttpError(
+    res.status,
+    body.error || `${fallback} HTTP ${res.status}`,
+    body.code,
+    body.retryable,
+    body.request_id,
+    body.details,
+  )
+}
+
+function validateEmbedUrl(value: string): void {
+  let url: URL
+  try { url = new URL(value) } catch { throw new Error('invalid Reviso embed URL') }
+  if (url.protocol !== 'https:' || url.username !== '' || url.password !== '') {
+    throw new Error('invalid Reviso embed URL')
+  }
 }
 
 export function startRevisoOAuth(): void {

@@ -150,7 +150,7 @@ test('publishes with credential refs and binds the agent session', async () => {
 
   assert.deepEqual(result, {
     document_id: 'doc_123',
-    review_url: '/documents/doc_123',
+    review_url: `${baseUrl}/documents/doc_123`,
     workspace_id: 'wsp_personal',
     updated: false,
     version_id: 'ver_created',
@@ -306,7 +306,7 @@ test('falls back to the Reviso CLI OAuth login and resolves the workspace', asyn
   await writeFile(credentialsPath, JSON.stringify({
     server: baseUrl,
     servers: { [baseUrl]: { access_token: 'rak_cli', connection_id: 'con_cli' } },
-  }))
+  }), { mode: 0o600 })
   const saved = process.env.REVISO_DSH_CLI_CREDENTIALS
   process.env.REVISO_DSH_CLI_CREDENTIALS = credentialsPath
   try {
@@ -341,7 +341,7 @@ test('treats the CLI expires_at as epoch seconds and refreshes first', async () 
         expires_at: Math.floor(Date.now() / 1000) - 10,
       },
     },
-  }))
+  }), { mode: 0o600 })
   const saved = process.env.REVISO_DSH_CLI_CREDENTIALS
   process.env.REVISO_DSH_CLI_CREDENTIALS = credentialsPath
   try {
@@ -382,7 +382,7 @@ test('updates an existing document without create-only fields or a default sourc
 
   assert.deepEqual(result, {
     document_id: 'doc_123',
-    review_url: '/documents/doc_123',
+    review_url: `${baseUrl}/documents/doc_123`,
     workspace_id: 'wsp_personal',
     updated: true,
     version_id: 'ver_updated',

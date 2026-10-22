@@ -4,7 +4,8 @@
  * The browser never sees a Reviso token. `/plugins/reviso/auth/start` performs
  * dynamic client registration + PKCE and redirects to Reviso; the callback
  * exchanges the code, stores REVISO_DSH_* refs in DSH credentials, and closes
- * the popup. Routes are loopback-only, matching the DSH /api trust boundary.
+ * the popup. Every route is admitted by the same authenticated DSH browser Peer
+ * as `/api`; the wire headers alone never establish identity.
  */
 import { createHash, randomBytes } from 'node:crypto'
 import {
@@ -12,36 +13,38 @@ import {
   WORKSPACE_REF, clearCredential, expiryFrom, normalizeServer, readCredential,
   resolveConnectionId, resolvePersonalWorkspace, storeCredential,
 } from './credentials.js'
+import { RevisoApiError, apiErrorPayload, errorFromResponse, messageOf } from './errors.js'
+import { publishedGeneration } from './generation.js'
 
 const DEFAULT_SERVER = 'https://reviso.work'
 const PENDING_TTL_MS = 10 * 60 * 1000
 const REQUEST_TIMEOUT_MS = 30_000
 const JSON_BODY_LIMIT_BYTES = 64 * 1024
+const MAX_PENDING_STATES = 32
+const MAX_REGISTERED_CLIENTS = 16
+const MUTATION_HEADER = 'x-reviso-dsh-request'
+const MUTATION_HEADER_VALUE = '1'
 
-class RevisoHttpError extends Error {
-  constructor(status, text) {
-    super(`Reviso request failed (HTTP ${status}): ${text.slice(0, 300)}`)
-    this.name = 'RevisoHttpError'
-    this.status = status
-  }
-}
+class RevisoHttpError extends RevisoApiError {}
 
 export function createOAuthBridge(ctx, options = {}) {
   if (ctx.webServer?.register === undefined) return () => {}
 
   const defaultServer = normalizeServer(options.server || DEFAULT_SERVER)
+  if (defaultServer === '') throw new Error('Reviso bridge server must be an HTTPS origin')
   const pending = new Map()
   const clients = new Map()
+  const admission = bridgeAdmission(ctx)
   const disposers = [
     ctx.webServer.register({
       kind: 'exact',
       path: '/plugins/reviso/auth/status',
-      handler: (req, res) => handleStatus(ctx, req, res),
+      handler: (req, res) => handleStatus(ctx, req, res, admission),
     }),
     ctx.webServer.register({
       kind: 'exact',
       path: '/plugins/reviso/auth/start',
-      handler: (req, res) => handleStart(ctx, req, res, defaultServer, pending, clients),
+      handler: (req, res) => handleStart(ctx, req, res, defaultServer, pending, clients, admission),
     }),
     ctx.webServer.register({
       kind: 'exact',
@@ -51,34 +54,34 @@ export function createOAuthBridge(ctx, options = {}) {
     ctx.webServer.register({
       kind: 'exact',
       path: '/plugins/reviso/auth/logout',
-      handler: (req, res) => handleLogout(ctx, req, res),
+      handler: (req, res) => handleLogout(ctx, req, res, admission),
     }),
     ctx.webServer.register({
       kind: 'exact',
       path: '/plugins/reviso/documents',
-      handler: (req, res) => handleDocuments(ctx, req, res),
+      handler: (req, res) => handleDocuments(ctx, req, res, admission),
     }),
     ctx.webServer.register({
       kind: 'exact',
       path: '/plugins/reviso/document',
-      handler: (req, res) => handleDocument(ctx, req, res),
+      handler: (req, res) => handleDocument(ctx, req, res, admission),
     }),
     ctx.webServer.register({
       kind: 'exact',
       path: '/plugins/reviso/embed-session',
-      handler: (req, res) => handleEmbedSession(ctx, req, res),
+      handler: (req, res) => handleEmbedSession(ctx, req, res, admission),
     }),
     ctx.webServer.register({
       kind: 'exact',
       path: '/plugins/reviso/dashboard',
-      handler: (req, res) => handleDashboard(ctx, req, res),
+      handler: (req, res) => handleDashboard(ctx, req, res, admission),
     }),
   ]
   return () => { for (const dispose of disposers) dispose() }
 }
 
-async function handleStatus(ctx, req, res) {
-  if (!isLoopback(req)) return forbidden(res)
+async function handleStatus(ctx, req, res, admission) {
+  if (!requireAdmission(req, res, admission)) return
   const token = await describe(ctx, TOKEN_REF)
   const server = await resolveRef(ctx, SERVER_REF)
   const workspaceId = await resolveRef(ctx, WORKSPACE_REF)
@@ -86,16 +89,18 @@ async function handleStatus(ctx, req, res) {
     connected: token.configured && server !== '' && workspaceId !== '',
     server,
     workspaceId,
+    generation: publishedGeneration(server, workspaceId),
     capabilities: {
       embed: process.env.REVISO_DSH_EMBED_CAPABILITY || 'unknown',
+      embedOrigin: resolveEmbedOrigin(server),
     },
   })
 }
 
-async function handleDocuments(ctx, req, res) {
-  if (!isLoopback(req)) return forbidden(res)
+async function handleDocuments(ctx, req, res, admission) {
+  if (!requireAdmission(req, res, admission)) return
   try {
-    const url = new URL(req.url || '', `http://${req.headers.host || '127.0.0.1'}`)
+    const url = new URL(req.url || '', 'http://reviso-dsh.invalid')
     const sessionId = url.searchParams.get('session_id') || ''
     if (sessionId === '') throw new Error('session_id required')
     const body = await authenticatedGet(
@@ -108,12 +113,12 @@ async function handleDocuments(ctx, req, res) {
   }
 }
 
-async function handleDocument(ctx, req, res) {
-  if (!isLoopback(req)) return forbidden(res)
+async function handleDocument(ctx, req, res, admission) {
+  if (!requireAdmission(req, res, admission)) return
   try {
-    const url = new URL(req.url || '', `http://${req.headers.host || '127.0.0.1'}`)
+    const url = new URL(req.url || '', 'http://reviso-dsh.invalid')
     const documentId = url.searchParams.get('id') || ''
-    if (documentId === '') throw new Error('id required')
+    if (!/^[a-z]{2,4}_[0-9a-f]{12}$/u.test(documentId)) throw new Error('valid id required')
     const body = await authenticatedGet(
       ctx,
       `/api/documents/${encodeURIComponent(documentId)}/latest-content`,
@@ -124,8 +129,8 @@ async function handleDocument(ctx, req, res) {
   }
 }
 
-async function handleEmbedSession(ctx, req, res) {
-  if (!isLoopback(req)) return forbidden(res)
+async function handleEmbedSession(ctx, req, res, admission) {
+  if (!requireAdmission(req, res, admission, { mutation: true })) return
   if ((req.method || 'POST') !== 'POST') {
     sendJson(res, 405, { error: 'method_not_allowed' })
     return
@@ -143,35 +148,37 @@ async function handleEmbedSession(ctx, req, res) {
     return
   }
   try {
+    const credential = await readCredential(ctx)
+    const embedOrigin = resolveEmbedOrigin(credential.server)
     const result = await authenticatedPost(
       ctx,
       `/api/embed/v1/documents/${encodeURIComponent(documentId)}/sessions`,
       {
         host: 'dsh',
-        origin: requestOrigin(req),
+        origin: embedOrigin,
         capabilities: ['read'],
         theme: normalizeTheme(body.theme),
         locale: String(body.locale || 'en').slice(0, 24),
       },
     )
-    const credential = await readCredential(ctx)
-    sendJson(res, 200, validateEmbedSession(result, credential.server, documentId))
+    sendJson(res, 200, validateEmbedSession(result, embedOrigin, documentId))
   } catch (error) {
     sendError(res, error)
   }
 }
 
-async function handleDashboard(ctx, req, res) {
-  if (!isLoopback(req)) return forbidden(res)
+async function handleDashboard(ctx, req, res, admission) {
+  if (!requireAdmission(req, res, admission)) return
   try {
     const credential = await readCredential(ctx)
-    const url = new URL(req.url || '', `http://${req.headers.host || '127.0.0.1'}`)
-    const limit = url.searchParams.get('limit') || '50'
-    const sourceKind = url.searchParams.get('source_kind') || ''
+    const url = new URL(req.url || '', 'http://reviso-dsh.invalid')
+    const limit = boundedInteger(url.searchParams.get('limit'), 50, 1, 100)
+    const offset = boundedInteger(url.searchParams.get('offset'), 0, 0, 1_000_000)
+    const sourceKind = normalizeSourceKind(url.searchParams.get('source_kind'))
     const body = await authenticatedGet(
       ctx,
       `/api/dashboard/documents?workspace_id=${encodeURIComponent(credential.workspaceId)}`
-      + `&limit=${encodeURIComponent(limit)}`
+      + `&limit=${String(limit)}&offset=${String(offset)}`
       + (sourceKind === '' ? '' : `&source_kind=${encodeURIComponent(sourceKind)}`),
     )
     sendJson(res, 200, body)
@@ -180,16 +187,18 @@ async function handleDashboard(ctx, req, res) {
   }
 }
 
-async function handleStart(ctx, req, res, defaultServer, pending, clients) {
-  if (!isLoopback(req)) return forbidden(res)
+async function handleStart(ctx, req, res, defaultServer, pending, clients, admission) {
+  if (!requireAdmission(req, res, admission, { mutation: true })) return
   try {
     const server = defaultServer
-    const origin = `http://${req.headers.host}`
+    const origin = callbackOrigin(ctx, req)
     const redirectUri = `${origin}/plugins/reviso/auth/callback`
     const metadata = await oauthMetadata(server)
     const clientId = await registerClient(metadata, redirectUri, clients)
     const state = base64url(randomBytes(24))
     const verifier = base64url(randomBytes(32))
+    pruneOAuthCaches(pending, clients)
+    if (pending.size >= MAX_PENDING_STATES) pending.delete(pending.keys().next().value)
     pending.set(state, {
       server,
       redirectUri,
@@ -216,11 +225,10 @@ async function handleStart(ctx, req, res, defaultServer, pending, clients) {
 }
 
 async function handleCallback(ctx, req, res, pending) {
-  // The provider redirect is a top-level cross-site navigation. Host must stay
-  // loopback; state + PKCE, not Sec-Fetch-Site, authenticate this callback.
-  if (!isLoopback(req, { allowCrossSite: true })) return forbidden(res)
+  // The provider redirect is a top-level cross-site navigation. An unguessable,
+  // single-use state and PKCE authenticate this callback; it never reads creds.
   try {
-    const url = new URL(req.url || '', `http://${req.headers.host || '127.0.0.1'}`)
+    const url = new URL(req.url || '', 'http://reviso-dsh.invalid')
     const state = url.searchParams.get('state') || ''
     const code = url.searchParams.get('code') || ''
     const denied = url.searchParams.get('error')
@@ -229,6 +237,7 @@ async function handleCallback(ctx, req, res, pending) {
     if (entry === undefined || Date.now() - entry.createdAt > PENDING_TTL_MS) {
       throw new Error('OAuth state expired or unknown; restart the connection')
     }
+    pruneOAuthCaches(pending)
     if (denied) throw new Error(`Reviso authorization denied (${denied})`)
     if (code === '') throw new Error('Reviso authorization returned no code')
 
@@ -264,12 +273,18 @@ async function handleCallback(ctx, req, res, pending) {
   }
 }
 
-async function handleLogout(ctx, req, res) {
-  if (!isLoopback(req)) return forbidden(res)
-  let remoteRevoked = false
-  let message = ''
+async function handleLogout(ctx, req, res, admission) {
+  if (!requireAdmission(req, res, admission, { mutation: true })) return
+  let credential
   try {
-    const credential = await readCredential(ctx, { forceRefresh: true })
+    credential = await readCredential(ctx, { forceRefresh: true })
+  } catch (error) {
+    await clearCredential(ctx)
+    sendJson(res, 200, { connected: false, remoteRevoked: false, message: messageOf(error) })
+    return
+  }
+  try {
+    if (credential.connectionId === '') throw new Error('no connection id is available to verify logout')
     const response = await fetch(
       `${credential.server}/api/agent/connections/${encodeURIComponent(credential.connectionId)}/revoke`,
       {
@@ -278,22 +293,14 @@ async function handleLogout(ctx, req, res) {
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       },
     )
-    if (!response.ok && response.status !== 404) {
-      const text = await response.text()
-      message = `remote revoke failed (HTTP ${response.status}): ${text.slice(0, 200)}`
-    } else {
-      remoteRevoked = true
-    }
+    const text = await response.text()
+    if (!response.ok) throw errorFromResponse(response.status, text)
   } catch (error) {
-    message = `remote revoke not verified: ${messageOf(error)}`
-  } finally {
-    await clearCredential(ctx)
+    sendError(res, error, 502)
+    return
   }
-  sendJson(res, 200, {
-    connected: false,
-    remoteRevoked,
-    ...(message === '' ? {} : { message }),
-  })
+  await clearCredential(ctx)
+  sendJson(res, 200, { connected: false, remoteRevoked: true })
 }
 
 async function oauthMetadata(server) {
@@ -313,7 +320,11 @@ async function oauthMetadata(server) {
 async function registerClient(metadata, redirectUri, clients) {
   const cacheKey = `${metadata.registration_endpoint}|${redirectUri}`
   const cached = clients.get(cacheKey)
-  if (cached !== undefined) return cached
+  if (cached !== undefined) {
+    clients.delete(cacheKey)
+    clients.set(cacheKey, cached)
+    return cached
+  }
   const result = await oauthJson(metadata.registration_endpoint, {
     client_name: 'Reviso for DeepSeek Harness',
     redirect_uris: [redirectUri],
@@ -325,6 +336,7 @@ async function registerClient(metadata, redirectUri, clients) {
     throw new Error('Reviso client registration returned no client_id')
   }
   clients.set(cacheKey, result.client_id)
+  while (clients.size > MAX_REGISTERED_CLIENTS) clients.delete(clients.keys().next().value)
   return result.client_id
 }
 
@@ -336,7 +348,7 @@ async function authenticatedGet(ctx, path) {
     result = await revisoGetRaw(credential, path)
   }
   if (result.status < 200 || result.status >= 300) {
-    throw new RevisoHttpError(result.status, result.text)
+    throw new RevisoHttpError(result.status, messageOf(errorFromResponse(result.status, result.text)))
   }
   return JSON.parse(result.text)
 }
@@ -349,7 +361,7 @@ async function authenticatedPost(ctx, path, body) {
     result = await revisoPostRaw(credential, path, body)
   }
   if (result.status < 200 || result.status >= 300) {
-    throw new RevisoHttpError(result.status, result.text)
+    throw errorFromResponse(result.status, result.text)
   }
   return JSON.parse(result.text)
 }
@@ -403,9 +415,7 @@ async function oauthJson(url, body, form = false) {
       signal: controller.signal,
     })
     const text = await response.text()
-    if (!response.ok) {
-      throw new Error(`Reviso OAuth request failed (HTTP ${response.status}): ${text.slice(0, 200)}`)
-    }
+    if (!response.ok) throw errorFromResponse(response.status, text)
     return JSON.parse(text)
   } finally {
     clearTimeout(timer)
@@ -429,24 +439,38 @@ function base64url(buffer) {
   return Buffer.from(buffer).toString('base64url')
 }
 
-function requestOrigin(req) {
-  const origin = String(req.headers.origin || '')
-  if (origin !== '') return new URL(origin).origin
-  return `http://${req.headers.host || '127.0.0.1'}`
+function callbackOrigin(ctx, req) {
+  try {
+    const origin = ctx.webServer?.getOrigin?.()
+    if (typeof origin === 'string' && origin !== '') return new URL(origin).origin
+  } catch {}
+  const host = String(req.headers.host || '')
+  if (!isTrustedLoopbackAuthority(host)) throw new Error('loopback web origin required')
+  return `http://${host}`
+}
+
+function resolveEmbedOrigin(server) {
+  const configured = normalizeServer(process.env.REVISO_DSH_EMBED_ORIGIN || '')
+  if (configured !== '' && new URL(configured).protocol === 'https:') return configured
+  const normalizedServer = normalizeServer(server)
+  return normalizedServer === '' ? '' : new URL(normalizedServer).origin
 }
 
 function normalizeTheme(value) {
   return value === 'light' || value === 'dark' || value === 'system' ? value : 'system'
 }
 
-function validateEmbedSession(result, server, documentId) {
+function validateEmbedSession(result, embedOrigin, documentId) {
   if (typeof result !== 'object' || result === null) throw new Error('invalid embed session response')
   const sessionId = String(result.session_id || '')
-  if (!/^ems_[0-9a-f]{12}$/.test(sessionId)) throw new Error('invalid embed session id')
+  if (!/^ems_[0-9a-f]{12}$/u.test(sessionId)) throw new Error('invalid embed session id')
   if (String(result.document_id || '') !== documentId) throw new Error('embed session document mismatch')
-  const embedUrl = new URL(String(result.embed_url || ''))
-  // Frame and hashed assets may share a different origin from the API. They
-  // must still be HTTPS and match the exact document/session/path below.
+  let embedUrl
+  try { embedUrl = new URL(String(result.embed_url || '')) } catch { throw new Error('invalid embed session URL') }
+  if (embedOrigin === '' || embedUrl.origin !== new URL(embedOrigin).origin) {
+    throw new Error('embed session origin mismatch')
+  }
+  if (embedUrl.username !== '' || embedUrl.password !== '') throw new Error('embed session credentials forbidden')
   if (embedUrl.protocol !== 'https:') throw new Error('embed session HTTPS required')
   if (embedUrl.pathname !== `/embed/v1/documents/${documentId}`) {
     throw new Error('embed session path mismatch')
@@ -477,26 +501,68 @@ async function readJsonRequest(req) {
   return JSON.parse(body || '{}')
 }
 
-function isLoopback(req, { allowCrossSite = false } = {}) {
-  const host = String(req.headers.host || '')
-  const hostname = host.startsWith('[') ? host.slice(1, host.indexOf(']')) : host.split(':')[0]
-  if (!['127.0.0.1', 'localhost', '::1'].includes(hostname.toLowerCase())) return false
-  if (allowCrossSite) return true
-  const site = req.headers['sec-fetch-site']
-  if (site !== undefined && site !== 'same-origin' && site !== 'none') return false
-  const origin = req.headers.origin
-  if (origin !== undefined) {
-    try {
-      if (new URL(String(origin)).host !== host) return false
-    } catch {
+function bridgeAdmission(ctx) {
+  const connection = ctx.connection
+  if (connection?.admit !== undefined) {
+    return req => connection.admit(req)
+  }
+  return undefined
+}
+
+function requireAdmission(req, res, admit, { mutation = false } = {}) {
+  if (!isLoopbackPeer(req)) {
+    sendJson(res, 403, { error: 'loopback_required', code: 'forbidden', retryable: false, status: 403 })
+    return false
+  }
+  if (admit !== undefined) {
+    const value = admit(req)
+    if (value?.rejection !== undefined) {
+      sendJson(res, value.rejection, {
+        error: value.rejection === 401 ? 'authentication_required' : 'request_forbidden',
+        code: value.rejection === 401 ? 'unauthorized' : 'forbidden',
+        retryable: false,
+        status: value.rejection,
+      })
       return false
     }
+  }
+  if (mutation && req.headers[MUTATION_HEADER] !== MUTATION_HEADER_VALUE) {
+    sendJson(res, 403, { error: 'same-origin request header required', code: 'forbidden', retryable: false, status: 403 })
+    return false
   }
   return true
 }
 
-function forbidden(res) {
-  sendJson(res, 403, { error: 'loopback_required' })
+function isLoopbackPeer(req) {
+  const address = String(req.socket?.remoteAddress || '')
+  if (address === '') return false
+  const value = address.toLowerCase()
+  return value === '::1' || value === '127.0.0.1' || value.startsWith('127.')
+    || value === '::ffff:127.0.0.1'
+}
+
+function isTrustedLoopbackAuthority(value) {
+  try {
+    const url = new URL(`http://${value}`)
+    const host = url.hostname.toLowerCase()
+    return host === 'localhost' || host === '::1' || host === '[::1]' || /^127(?:\.\d{1,3}){3}$/u.test(host)
+  } catch { return false }
+}
+
+function pruneOAuthCaches(pending, clients = undefined) {
+  const now = Date.now()
+  for (const [state, entry] of pending) {
+    if (now - entry.createdAt > PENDING_TTL_MS) pending.delete(state)
+  }
+  if (pending.size > MAX_PENDING_STATES) {
+    for (const state of pending.keys()) {
+      if (pending.size <= MAX_PENDING_STATES) break
+      pending.delete(state)
+    }
+  }
+  if (clients !== undefined) {
+    while (clients.size > MAX_REGISTERED_CLIENTS) clients.delete(clients.keys().next().value)
+  }
 }
 
 function sendJson(res, status, value) {
@@ -523,20 +589,28 @@ function renderError(res, error) {
   res.end(`<!doctype html><meta charset="utf-8"><title>Reviso connection failed</title>
 <body style="font:14px system-ui;padding:24px">
 <p>Reviso connection failed.</p>
-<pre style="white-space:pre-wrap">${escapeHtml(error instanceof Error ? error.message : String(error))}</pre>
+<pre style="white-space:pre-wrap">${escapeHtml(messageOf(error))}</pre>
 </body>`)
 }
 
-function messageOf(error) {
-  return error instanceof Error ? error.message : String(error)
+function boundedInteger(value, fallback, min, max) {
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed)) return fallback
+  return Math.min(max, Math.max(min, parsed))
+}
+
+function normalizeSourceKind(value) {
+  return value === 'dsh' ? value : ''
 }
 
 function sendError(res, error, fallbackStatus = 502) {
-  const status = error instanceof RevisoHttpError ? error.status : fallbackStatus
+  const status = error instanceof RevisoApiError ? error.status : fallbackStatus
+  const payload = apiErrorPayload(error instanceof RevisoApiError ? error : new RevisoApiError(status, messageOf(error), {
+    code: 'request_failed',
+  }))
   sendJson(res, status, {
-    error: messageOf(error),
-    code: error instanceof RevisoHttpError && status === 404 ? 'not_implemented' : 'request_failed',
-    status,
+    ...payload,
+    ...(error instanceof RevisoApiError && error.status === 404 ? { code: error.code || 'not_found' } : {}),
   })
 }
 

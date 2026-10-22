@@ -17,8 +17,12 @@ function response() {
   }
 }
 
-function request(url, host = '127.0.0.1:3080') {
-  return { url, headers: { host } }
+function request(url, host = '127.0.0.1:3080', options = {}) {
+  return {
+    url,
+    headers: { host, ...(options.headers || {}) },
+    socket: { remoteAddress: options.remoteAddress || '127.0.0.1' },
+  }
 }
 
 function setupBridge() {
@@ -105,9 +109,9 @@ function installFetch() {
         token_expires_in: 900,
       })
     }
-    if (String(url).includes('/api/documents/doc_1/latest-content')) {
+    if (String(url).includes('/api/documents/doc_abcdef123456/latest-content')) {
       return json(200, {
-        document_id: 'doc_1',
+        document_id: 'doc_abcdef123456',
         version_id: 'ver_1',
         version_no: 1,
         source_format: 'markdown',
@@ -159,23 +163,25 @@ test('preserves an upstream embed 404 as a typed capability failure', async () =
   const fakeFetch = installFetch()
   try {
     const res = response()
-    const req = { url: '/plugins/reviso/embed-session', headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' }, method: 'POST', body: { document_id: 'doc_000000000001' } }
+    const req = { url: '/plugins/reviso/embed-session', headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-reviso-dsh-request': '1' }, method: 'POST', body: { document_id: 'doc_000000000001' }, socket: { remoteAddress: '127.0.0.1' } }
     await routes.get('/plugins/reviso/embed-session')(req, res)
     assert.equal(res.status, 404)
     const payload = JSON.parse(res.body)
     assert.equal(payload.status, 404)
-    assert.equal(payload.code, 'not_implemented')
+    assert.equal(payload.code, 'not_found')
   } finally {
     fakeFetch.restore()
   }
 })
 
 test('runs the OAuth start/callback flow without exposing the token', async () => {
+  const previousEmbedOrigin = process.env.REVISO_DSH_EMBED_ORIGIN
+  process.env.REVISO_DSH_EMBED_ORIGIN = 'https://reviso-api.fly.dev'
   const { routes, values } = setupBridge()
   const fakeFetch = installFetch()
   try {
     const startRes = response()
-    await routes.get('/plugins/reviso/auth/start')(request('/plugins/reviso/auth/start'), startRes)
+    await routes.get('/plugins/reviso/auth/start')(request('/plugins/reviso/auth/start', '127.0.0.1:3080', { headers: { 'x-reviso-dsh-request': '1' } }), startRes)
     assert.equal(startRes.status, 302)
     const location = new URL(startRes.headers.Location)
     assert.equal(location.origin + location.pathname, 'https://reviso.work/oauth/authorize')
@@ -186,7 +192,7 @@ test('runs the OAuth start/callback flow without exposing the token', async () =
     const state = location.searchParams.get('state')
 
     const secondStart = response()
-    await routes.get('/plugins/reviso/auth/start')(request('/plugins/reviso/auth/start'), secondStart)
+    await routes.get('/plugins/reviso/auth/start')(request('/plugins/reviso/auth/start', '127.0.0.1:3080', { headers: { 'x-reviso-dsh-request': '1' } }), secondStart)
     assert.equal(secondStart.status, 302)
     assert.equal(fakeFetch.calls.filter(call => call.url.endsWith('/oauth/register')).length, 1)
 
@@ -224,7 +230,8 @@ test('runs the OAuth start/callback flow without exposing the token', async () =
       connected: true,
       server: 'https://reviso.work',
       workspaceId: 'wsp_personal',
-      capabilities: { embed: 'unknown' },
+      generation: 0,
+      capabilities: { embed: 'unknown', embedOrigin: 'https://reviso-api.fly.dev' },
     })
     assert.doesNotMatch(statusRes.body, /rak_oauth/)
 
@@ -239,11 +246,11 @@ test('runs the OAuth start/callback flow without exposing the token', async () =
 
     const documentRes = response()
     await routes.get('/plugins/reviso/document')(
-      request('/plugins/reviso/document?id=doc_1'),
+      request('/plugins/reviso/document?id=doc_abcdef123456'),
       documentRes,
     )
     assert.deepEqual(JSON.parse(documentRes.body), {
-      document_id: 'doc_1',
+      document_id: 'doc_abcdef123456',
       version_id: 'ver_1',
       version_no: 1,
       source_format: 'markdown',
@@ -254,8 +261,9 @@ test('runs the OAuth start/callback flow without exposing the token', async () =
     await routes.get('/plugins/reviso/embed-session')({
       url: '/plugins/reviso/embed-session',
       method: 'POST',
-      headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+      headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-reviso-dsh-request': '1' },
       body: { document_id: 'doc_abcdef123456', theme: 'dark', locale: 'zh-CN' },
+      socket: { remoteAddress: '127.0.0.1' },
     }, embedRes)
     assert.equal(embedRes.status, 200, embedRes.body)
     assert.equal(JSON.parse(embedRes.body).session_id, 'ems_abcdef123456')
@@ -263,7 +271,7 @@ test('runs the OAuth start/callback flow without exposing the token', async () =
     assert.equal(embedCall.options.method, 'POST')
     assert.deepEqual(JSON.parse(embedCall.options.body), {
       host: 'dsh',
-      origin: 'http://127.0.0.1:3080',
+      origin: 'https://reviso-api.fly.dev',
       capabilities: ['read'],
       theme: 'dark',
       locale: 'zh-CN',
@@ -279,9 +287,11 @@ test('runs the OAuth start/callback flow without exposing the token', async () =
       reviews: [{ document_id: 'doc_1', title: 'Doc' }],
     })
     assert.doesNotMatch(sessionRes.body + documentRes.body + dashboardRes.body, /rak_oauth/)
+    if (previousEmbedOrigin === undefined) delete process.env.REVISO_DSH_EMBED_ORIGIN
+    else process.env.REVISO_DSH_EMBED_ORIGIN = previousEmbedOrigin
 
     const logoutRes = response()
-    await routes.get('/plugins/reviso/auth/logout')(request('/plugins/reviso/auth/logout'), logoutRes)
+    await routes.get('/plugins/reviso/auth/logout')(request('/plugins/reviso/auth/logout', '127.0.0.1:3080', { headers: { 'x-reviso-dsh-request': '1' } }), logoutRes)
     assert.deepEqual(JSON.parse(logoutRes.body), { connected: false, remoteRevoked: true })
     assert.equal(values.size, 0)
     assert.ok(fakeFetch.calls.some(call => call.url.endsWith('/api/agent/connections/con_1/revoke')))
@@ -339,11 +349,11 @@ test('refreshes before resolving a missing workspace', async () => {
   }
 })
 
-test('rejects non-loopback hosts', async () => {
+test('rejects non-loopback socket peers even with a spoofed loopback Host', async () => {
   const { routes } = setupBridge()
   const res = response()
   await routes.get('/plugins/reviso/auth/status')(
-    request('/plugins/reviso/auth/status', 'example.com'),
+    request('/plugins/reviso/auth/status', '127.0.0.1:3080', { remoteAddress: '203.0.113.9' }),
     res,
   )
   assert.equal(res.status, 403)

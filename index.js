@@ -1,5 +1,8 @@
+import { createHash } from 'node:crypto'
 import { createOAuthBridge } from './host/oauth.js'
 import { readCredential } from './host/credentials.js'
+import { errorFromResponse, messageOf } from './host/errors.js'
+import { markPublished } from './host/generation.js'
 
 /**
  * Host half for reviso-dsh.
@@ -117,6 +120,7 @@ function revisoPublishTool(ctx) {
 
       const documentId = String(args.document_id || '').trim()
       const baseVersionId = String(args.base_version_id || '').trim()
+      const operationId = publishOperationId(exec, args, sessionId)
       if ((documentId === '') !== (baseVersionId === '')) {
         throw new Error('document_id and base_version_id must be provided together')
       }
@@ -149,10 +153,12 @@ function revisoPublishTool(ctx) {
           description: args.description || 'Published from DeepSeek Harness',
         }
         if (args.source_format !== undefined) body.source_format = args.source_format
-        const response = await postUpdate(ctx, credential, documentId, body, exec?.signal)
+        const response = await postUpdate(ctx, credential, documentId, body, exec?.signal, operationId)
+        const responseDocumentId = String(response.document_id || documentId)
+        markPublished(credential.server, credential.workspaceId)
         return {
-          document_id: String(response.document_id || documentId),
-          review_url: String(response.review_url || publicDocumentPath(documentId)),
+          document_id: responseDocumentId,
+          review_url: canonicalReviewUrl(credential.server, responseDocumentId, response.review_url),
           workspace_id: String(response.workspace_id || credential.workspaceId),
           updated: true,
           version_id: String(response.version_id || ''),
@@ -175,10 +181,12 @@ function revisoPublishTool(ctx) {
       }
       if (args.parent_id !== undefined && args.parent_id !== '') body.parent_id = args.parent_id
 
-      const response = await postDocument(ctx, credential, body, exec?.signal)
+      const response = await postDocument(ctx, credential, body, exec?.signal, operationId)
+      const responseDocumentId = String(response.document_id || '')
+      markPublished(credential.server, credential.workspaceId)
       return {
-        document_id: String(response.document_id || ''),
-        review_url: String(response.review_url || ''),
+        document_id: responseDocumentId,
+        review_url: canonicalReviewUrl(credential.server, responseDocumentId, response.review_url),
         workspace_id: String(response.workspace_id || credential.workspaceId),
         updated: false,
         version_id: String(response.version_id || ''),
@@ -187,17 +195,14 @@ function revisoPublishTool(ctx) {
   }
 }
 
-async function postDocument(ctx, credential, body, callerSignal) {
+async function postDocument(ctx, credential, body, callerSignal, operationId) {
   let current = credential
-  let result = await publishAttempt(current, body, callerSignal)
+  let result = await publishAttempt(current, body, callerSignal, '/api/documents', operationId)
   if (result.status === 401 && current.refreshToken !== '') {
     current = await readCredential(ctx, { forceRefresh: true })
-    result = await publishAttempt(current, body, callerSignal)
+    result = await publishAttempt(current, body, callerSignal, '/api/documents', operationId)
   }
-  if (result.status < 200 || result.status >= 300) {
-    throw new Error(`Reviso publish failed (HTTP ${result.status}): ${result.text.slice(0, 300)}`)
-  }
-  return JSON.parse(result.text)
+  return parseSuccessfulPublish(result)
 }
 
 async function preflightCreate(credential, sessionId, args, callerSignal) {
@@ -235,7 +240,7 @@ async function preflightCreate(credential, sessionId, args, callerSignal) {
     }
   } catch (error) {
     if (String(error?.message || '').startsWith('An active Reviso document')) throw error
-    console.warn('[reviso-dsh] duplicate-title preflight failed; allowing create:', error)
+    console.warn('[reviso-dsh] duplicate-title preflight failed; allowing create:', messageOf(error))
   }
 }
 
@@ -248,7 +253,7 @@ async function assertDeckUpdateTarget(credential, documentId, callerSignal) {
     callerSignal,
   )
   if (response.status < 200 || response.status >= 300) {
-    throw new Error(`Reviso publish failed (HTTP ${response.status}): ${response.text.slice(0, 300)}`)
+    throw errorFromResponse(response.status, response.text)
   }
   let payload
   try {
@@ -265,39 +270,58 @@ async function assertDeckUpdateTarget(credential, documentId, callerSignal) {
   return payload
 }
 
-async function postUpdate(ctx, credential, documentId, body, callerSignal) {
+async function postUpdate(ctx, credential, documentId, body, callerSignal, operationId) {
   let current = credential
-  let result = await publishAttempt(
-    current,
-    body,
-    callerSignal,
-    `/api/documents/${encodeURIComponent(documentId)}/agent-update`,
-  )
+  const path = `/api/documents/${encodeURIComponent(documentId)}/agent-update`
+  let result = await publishAttempt(current, body, callerSignal, path, operationId)
   if (result.status === 401 && current.refreshToken !== '') {
     current = await readCredential(ctx, { forceRefresh: true })
-    result = await publishAttempt(
-      current,
-      body,
-      callerSignal,
-      `/api/documents/${encodeURIComponent(documentId)}/agent-update`,
-    )
+    result = await publishAttempt(current, body, callerSignal, path, operationId)
   }
+  return parseSuccessfulPublish(result)
+}
+
+async function publishAttempt(credential, body, callerSignal, path = '/api/documents', operationId = '') {
+  return requestAttempt(credential, 'POST', path, body, callerSignal, operationId)
+}
+
+function parseSuccessfulPublish(result) {
   if (result.status < 200 || result.status >= 300) {
-    throw new Error(`Reviso publish failed (HTTP ${result.status}): ${result.text.slice(0, 300)}`)
+    throw errorFromResponse(result.status, result.text)
   }
-  return JSON.parse(result.text)
+  try {
+    const value = JSON.parse(result.text)
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('not an object')
+    return value
+  } catch {
+    throw new Error('Reviso publish failed: response was not valid JSON')
+  }
 }
 
-async function publishAttempt(credential, body, callerSignal, path = '/api/documents') {
-  return requestAttempt(credential, 'POST', path, body, callerSignal)
+function publishOperationId(exec, args, sessionId) {
+  const replay = typeof exec?.callId === 'string' && exec.callId !== ''
+    ? exec.callId
+    : `${sessionId}:${args.document_id || ''}:${args.base_version_id || ''}:${args.title || ''}:${args.content || ''}`
+  return `reviso_dsh_${createHash('sha256').update(replay).digest('hex').slice(0, 40)}`
 }
 
-function publicDocumentPath(documentId) {
-  const match = /^doc_([0-9a-f]{12})$/.exec(documentId)
-  return `/documents/${match ? match[1] : documentId}`
+function canonicalReviewUrl(server, documentId, explicit) {
+  if (documentId === '') throw new Error('Reviso publish response had no document_id')
+  if (typeof explicit === 'string' && explicit !== '') {
+    try {
+      const candidate = new URL(explicit, `${server}/`)
+      const expectedOrigin = new URL(server).origin
+      if (candidate.origin !== expectedOrigin) throw new Error('origin mismatch')
+      return candidate.toString()
+    } catch {
+      throw new Error('Reviso publish response had an invalid review_url')
+    }
+  }
+  const match = /^doc_([0-9a-f]{12})$/u.exec(documentId)
+  return new URL(`/documents/${match ? match[1] : encodeURIComponent(documentId)}`, `${server}/`).toString()
 }
 
-async function requestAttempt(credential, method, path, body, callerSignal) {
+async function requestAttempt(credential, method, path, body, callerSignal, operationId = '') {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   const signal = callerSignal === undefined
@@ -307,6 +331,7 @@ async function requestAttempt(credential, method, path, body, callerSignal) {
     Accept: 'application/json',
   }
   if (body !== undefined) headers['Content-Type'] = 'application/json'
+  if (operationId !== '') headers['Idempotency-Key'] = operationId
   headers.Authorization = `Bearer ${credential.token}`
   try {
     const response = await fetch(`${credential.server}${path}`, {
@@ -315,7 +340,7 @@ async function requestAttempt(credential, method, path, body, callerSignal) {
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal,
     })
-    return { status: response.status, text: await response.text() }
+    return { status: response.status, text: await response.text(), headers: response.headers }
   } finally {
     clearTimeout(timer)
   }

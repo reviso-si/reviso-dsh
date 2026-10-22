@@ -59,7 +59,7 @@ test('executes through the real ToolRuntime and credentials provider', async () 
       res.writeHead(201, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({
         document_id: 'doc_real',
-        review_url: '/documents/doc_real',
+        review_url: `${baseUrl}/documents/doc_real`,
         version_id: 'ver_real',
         workspace_id: 'wsp_personal',
       }))
@@ -107,7 +107,7 @@ test('executes through the real ToolRuntime and credentials provider', async () 
     assert.equal(result.isError, false)
     assert.deepEqual(result.value, {
       document_id: 'doc_real',
-      review_url: '/documents/doc_real',
+      review_url: `${baseUrl}/documents/doc_real`,
       workspace_id: 'wsp_personal',
       updated: false,
       version_id: 'ver_real',
