@@ -99,7 +99,7 @@ function installFetch() {
       return json(201, {
         session_id: 'ems_abcdef123456',
         document_id: 'doc_abcdef123456',
-        embed_url: 'https://reviso.work/embed/v1/documents/doc_abcdef123456?session=ems_abcdef123456#code=rem_code_secret',
+        embed_url: 'https://reviso-api.fly.dev/embed/v1/documents/doc_abcdef123456?session=ems_abcdef123456#code=rem_code_secret',
         code_expires_at: '2026-01-01T00:01:00+00:00',
         code_expires_in: 60,
         token_expires_in: 900,

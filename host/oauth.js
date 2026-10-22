@@ -445,8 +445,9 @@ function validateEmbedSession(result, server, documentId) {
   if (!/^ems_[0-9a-f]{12}$/.test(sessionId)) throw new Error('invalid embed session id')
   if (String(result.document_id || '') !== documentId) throw new Error('embed session document mismatch')
   const embedUrl = new URL(String(result.embed_url || ''))
-  const expected = new URL(server)
-  if (embedUrl.origin !== expected.origin) throw new Error('embed session origin mismatch')
+  // Frame and hashed assets may share a different origin from the API. They
+  // must still be HTTPS and match the exact document/session/path below.
+  if (embedUrl.protocol !== 'https:') throw new Error('embed session HTTPS required')
   if (embedUrl.pathname !== `/embed/v1/documents/${documentId}`) {
     throw new Error('embed session path mismatch')
   }
