@@ -10,6 +10,15 @@ let server
 let baseUrl
 let captured = []
 let unauthorizedOnce = false
+let duplicateDocuments = []
+let duplicateQueryStatus = 200
+let documentKind = 'html_deck'
+let updateStatus = 201
+let updateResponse = {
+  document_id: 'doc_123',
+  version_id: 'ver_updated',
+  workspace_id: 'wsp_personal',
+}
 
 before(async () => {
   server = http.createServer((req, res) => {
@@ -46,6 +55,29 @@ before(async () => {
         res.end(JSON.stringify({ connection: { id: 'con_cli', workspace_id: 'wsp_cli' } }))
         return
       }
+      if (req.url === '/api/documents?session_key=dsh%3Asess_123') {
+        res.writeHead(duplicateQueryStatus, { 'Content-Type': 'application/json' })
+        res.end(duplicateQueryStatus === 200
+          ? JSON.stringify({ documents: duplicateDocuments })
+          : JSON.stringify({ error: 'lookup failed' }))
+        return
+      }
+      if (req.url === '/api/documents/doc_123/latest-content') {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          document_id: 'doc_123',
+          document_kind: documentKind,
+          version_id: 'ver_1',
+        }))
+        return
+      }
+      if (req.url === '/api/documents/doc_123/agent-update') {
+        res.writeHead(updateStatus, { 'Content-Type': 'application/json' })
+        res.end(updateStatus >= 200 && updateStatus < 300
+          ? JSON.stringify(updateResponse)
+          : '{"error":{"code":"CAS_CONFLICT","message":"base_version_changed"}}')
+        return
+      }
       if (req.url === '/api/documents') {
         if (unauthorizedOnce) {
           unauthorizedOnce = false
@@ -58,6 +90,7 @@ before(async () => {
         res.end(JSON.stringify({
           document_id: 'doc_123',
           review_url: '/documents/doc_123',
+          version_id: 'ver_created',
           workspace_id: requestBody.workspace_id || 'wsp_personal',
         }))
         return
@@ -119,12 +152,16 @@ test('publishes with credential refs and binds the agent session', async () => {
     document_id: 'doc_123',
     review_url: '/documents/doc_123',
     workspace_id: 'wsp_personal',
+    updated: false,
+    version_id: 'ver_created',
   })
-  assert.equal(captured.length, 1)
-  assert.equal(captured[0].method, 'POST')
-  assert.equal(captured[0].url, '/api/documents')
-  assert.equal(captured[0].authorization, 'Bearer rak_test')
-  assert.deepEqual(captured[0].body, {
+  assert.equal(captured.length, 2)
+  assert.equal(captured[0].method, 'GET')
+  assert.equal(captured[0].url, '/api/documents?session_key=dsh%3Asess_123')
+  assert.equal(captured[1].method, 'POST')
+  assert.equal(captured[1].url, '/api/documents')
+  assert.equal(captured[1].authorization, 'Bearer rak_test')
+  assert.deepEqual(captured[1].body, {
     title: 'Session plan',
     content: '# Plan\n\nShip the spike.',
     source_format: 'markdown',
@@ -170,6 +207,95 @@ test('refuses to publish without a connected Reviso credential', async () => {
       if (value === undefined) delete process.env[key]
       else process.env[key] = value
     }
+  }
+})
+
+test('rejects a create without a title before making a request', async () => {
+  captured = []
+  const tool = registerTool(credentialProvider({
+    REVISO_DSH_TOKEN: 'rak_test',
+    REVISO_DSH_WORKSPACE_ID: 'wsp_personal',
+    REVISO_DSH_SERVER: baseUrl,
+  }))
+  await assert.rejects(
+    () => tool.execute({ content: 'Body' }, execContext('sess_123')),
+    /title is required when creating a document/,
+  )
+  assert.equal(captured.length, 0)
+})
+
+test('rejects a duplicate exact active title in the same session before create', async () => {
+  captured = []
+  duplicateDocuments = [
+    {
+      document_id: 'doc_old',
+      title: 'Session plan',
+      current_version_id: 'ver_1',
+      updated_at: '2026-10-21T10:00:00Z',
+      archived_at: null,
+    },
+    { document_id: 'doc_archived', title: 'Session plan', archived_at: '2026-01-01T00:00:00Z' },
+  ]
+  duplicateQueryStatus = 200
+  const tool = registerTool(credentialProvider({
+    REVISO_DSH_TOKEN: 'rak_test',
+    REVISO_DSH_WORKSPACE_ID: 'wsp_personal',
+    REVISO_DSH_SERVER: baseUrl,
+  }))
+  try {
+    await assert.rejects(
+      () => tool.execute({ title: 'Session plan', content: 'Body' }, execContext('sess_123')),
+      /document_id: doc_old.*version: ver_1.*updated_at: 2026-10-21T10:00:00Z.*allow_duplicate=true/,
+    )
+    assert.equal(captured.length, 2)
+    assert.equal(captured[1].method, 'GET')
+    assert.equal(captured[1].url, '/api/documents?session_key=dsh%3Asess_123')
+  } finally {
+    duplicateDocuments = []
+  }
+})
+
+test('allow_duplicate bypasses the duplicate preflight', async () => {
+  captured = []
+  duplicateDocuments = [{ document_id: 'doc_old', title: 'Session plan', archived_at: null }]
+  const tool = registerTool(credentialProvider({
+    REVISO_DSH_TOKEN: 'rak_test',
+    REVISO_DSH_WORKSPACE_ID: 'wsp_personal',
+    REVISO_DSH_SERVER: baseUrl,
+  }))
+  try {
+    await tool.execute({
+      title: 'Session plan',
+      content: 'Body',
+      allow_duplicate: true,
+    }, execContext('sess_123'))
+    assert.deepEqual(captured.map(row => row.url), [
+      '/api/agent-connection/self',
+      '/api/documents',
+    ])
+    assert.equal(captured[1].body.title, 'Session plan')
+  } finally {
+    duplicateDocuments = []
+  }
+})
+
+test('permits create when the duplicate preflight query fails', async () => {
+  captured = []
+  duplicateQueryStatus = 503
+  const tool = registerTool(credentialProvider({
+    REVISO_DSH_TOKEN: 'rak_test',
+    REVISO_DSH_WORKSPACE_ID: 'wsp_personal',
+    REVISO_DSH_SERVER: baseUrl,
+  }))
+  try {
+    await tool.execute({ title: 'Preflight unavailable', content: 'Body' }, execContext('sess_123'))
+    assert.deepEqual(captured.map(row => row.url), [
+      '/api/agent-connection/self',
+      '/api/documents?session_key=dsh%3Asess_123',
+      '/api/documents',
+    ])
+  } finally {
+    duplicateQueryStatus = 200
   }
 })
 
@@ -228,6 +354,153 @@ test('treats the CLI expires_at as epoch seconds and refreshes first', async () 
     if (saved === undefined) delete process.env.REVISO_DSH_CLI_CREDENTIALS
     else process.env.REVISO_DSH_CLI_CREDENTIALS = saved
     await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('updates an existing document without create-only fields or a default source format', async () => {
+  captured = []
+  documentKind = 'html_deck'
+  updateStatus = 201
+  updateResponse = {
+    document_id: 'doc_123',
+    version_id: 'ver_updated',
+    workspace_id: 'wsp_personal',
+  }
+  const tool = registerTool(credentialProvider({
+    REVISO_DSH_TOKEN: 'rak_test',
+    REVISO_DSH_WORKSPACE_ID: 'wsp_personal',
+    REVISO_DSH_SERVER: baseUrl,
+  }))
+
+  const result = await tool.execute({
+    title: 'Ignored on update',
+    content: '# Revised',
+    document_id: 'doc_123',
+    base_version_id: 'ver_1',
+    deck_contract_version: 'html-deck/1',
+  }, execContext('sess_123'))
+
+  assert.deepEqual(result, {
+    document_id: 'doc_123',
+    review_url: '/documents/doc_123',
+    workspace_id: 'wsp_personal',
+    updated: true,
+    version_id: 'ver_updated',
+  })
+  assert.deepEqual(captured.map(row => row.url), [
+    '/api/agent-connection/self',
+    '/api/documents/doc_123/latest-content',
+    '/api/documents/doc_123/agent-update',
+  ])
+  assert.deepEqual(captured[2].body, {
+    content: '# Revised',
+    base_version_id: 'ver_1',
+    description: 'Published from DeepSeek Harness',
+  })
+  assert.equal(Object.hasOwn(captured[2].body, 'deck_contract_version'), false)
+})
+
+test('update preserves an explicit source format', async () => {
+  captured = []
+  const tool = registerTool(credentialProvider({
+    REVISO_DSH_TOKEN: 'rak_test',
+    REVISO_DSH_WORKSPACE_ID: 'wsp_personal',
+    REVISO_DSH_SERVER: baseUrl,
+  }))
+  await tool.execute({
+    content: '<p>Revised</p>',
+    document_id: 'doc_123',
+    base_version_id: 'ver_1',
+    source_format: 'html',
+    description: 'Fresh HTML',
+  }, execContext('sess_123'))
+  const update = captured.find(row => row.url === '/api/documents/doc_123/agent-update')
+  assert.deepEqual(update.body, {
+    content: '<p>Revised</p>',
+    base_version_id: 'ver_1',
+    description: 'Fresh HTML',
+    source_format: 'html',
+  })
+})
+
+test('rejects deck contract updates for a non-deck document before POST', async () => {
+  captured = []
+  documentKind = 'document'
+  const tool = registerTool(credentialProvider({
+    REVISO_DSH_TOKEN: 'rak_test',
+    REVISO_DSH_WORKSPACE_ID: 'wsp_personal',
+    REVISO_DSH_SERVER: baseUrl,
+  }))
+  try {
+    await assert.rejects(
+      () => tool.execute({
+        content: '# Revised',
+        document_id: 'doc_123',
+        base_version_id: 'ver_1',
+        deck_contract_version: 'html-deck/1',
+      }, execContext('sess_123')),
+      /only valid for an html_deck document/,
+    )
+    assert.deepEqual(captured.map(row => row.url), [
+      '/api/agent-connection/self',
+      '/api/documents/doc_123/latest-content',
+    ])
+  } finally {
+    documentKind = 'html_deck'
+  }
+})
+
+test('rejects partial update identity before making a request', async () => {
+  captured = []
+  const tool = registerTool(credentialProvider({
+    REVISO_DSH_TOKEN: 'rak_test',
+    REVISO_DSH_WORKSPACE_ID: 'wsp_personal',
+    REVISO_DSH_SERVER: baseUrl,
+  }))
+  await assert.rejects(
+    () => tool.execute({ content: 'Body', document_id: 'doc_123' }, execContext('sess_123')),
+    /document_id and base_version_id must be provided together/,
+  )
+  await assert.rejects(
+    () => tool.execute({ content: 'Body', base_version_id: 'ver_1' }, execContext('sess_123')),
+    /document_id and base_version_id must be provided together/,
+  )
+  assert.equal(captured.length, 0)
+})
+
+test('does not retry a 409 update conflict and preserves the response text', async () => {
+  captured = []
+  documentKind = 'html_deck'
+  updateStatus = 409
+  const tool = registerTool(credentialProvider({
+    REVISO_DSH_TOKEN: 'rak_conflict',
+    REVISO_DSH_WORKSPACE_ID: 'wsp_personal',
+    REVISO_DSH_SERVER: baseUrl,
+    REVISO_DSH_REFRESH_TOKEN: 'rft_conflict',
+  }))
+  try {
+    await assert.rejects(
+      () => tool.execute({
+        content: '# Revised',
+        document_id: 'doc_123',
+        base_version_id: 'ver_stale',
+        deck_contract_version: 'html-deck/1',
+      }, execContext('sess_123')),
+      error => {
+        assert.match(error.message, /HTTP 409/)
+        assert.match(error.message, /CAS_CONFLICT/)
+        assert.match(error.message, /base_version_changed/)
+        return true
+      },
+    )
+    assert.deepEqual(captured.map(row => row.url), [
+      '/api/agent-connection/self',
+      '/api/documents/doc_123/latest-content',
+      '/api/documents/doc_123/agent-update',
+    ])
+    assert.ok(!captured.some(row => row.url === '/oauth/token'))
+  } finally {
+    updateStatus = 201
   }
 })
 
