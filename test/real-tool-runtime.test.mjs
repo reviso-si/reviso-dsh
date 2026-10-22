@@ -51,10 +51,16 @@ test('executes through the real ToolRuntime and credentials provider', async () 
         authorization: req.headers.authorization,
         body: raw === '' ? null : JSON.parse(raw),
       })
+      if (req.url === '/api/documents?session_key=dsh%3Asess_real') {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ documents: [] }))
+        return
+      }
       res.writeHead(201, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({
         document_id: 'doc_real',
         review_url: '/documents/doc_real',
+        version_id: 'ver_real',
         workspace_id: 'wsp_personal',
       }))
     })
@@ -103,13 +109,16 @@ test('executes through the real ToolRuntime and credentials provider', async () 
       document_id: 'doc_real',
       review_url: '/documents/doc_real',
       workspace_id: 'wsp_personal',
+      updated: false,
+      version_id: 'ver_real',
     })
-    assert.equal(captured.length, 1)
-    assert.equal(captured[0].url, '/api/documents')
-    assert.equal(captured[0].authorization, 'Bearer rak_real')
-    assert.equal(captured[0].body.source_kind, 'dsh')
-    assert.equal(captured[0].body.source_session_id, 'sess_real')
-    assert.equal(captured[0].body.workspace_id, 'wsp_personal')
+    assert.equal(captured.length, 2)
+    assert.equal(captured[0].url, '/api/documents?session_key=dsh%3Asess_real')
+    assert.equal(captured[1].url, '/api/documents')
+    assert.equal(captured[1].authorization, 'Bearer rak_real')
+    assert.equal(captured[1].body.source_kind, 'dsh')
+    assert.equal(captured[1].body.source_session_id, 'sess_real')
+    assert.equal(captured[1].body.workspace_id, 'wsp_personal')
   } finally {
     await new Promise(resolve => server.close(resolve))
     await rm(home, { recursive: true, force: true })
