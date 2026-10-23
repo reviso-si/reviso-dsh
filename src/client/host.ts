@@ -115,18 +115,62 @@ export interface RevisoEmbedSession {
   token_expires_in: number
 }
 
+export const ERROR_CODE_BY_STATUS = {
+  400: 'unsupported',
+  401: 'auth_expired',
+  403: 'forbidden',
+  404: 'not_found',
+  409: 'conflict',
+  422: 'unsupported',
+  501: 'unsupported',
+} as const
+
+export type RevisoErrorCode = 'not_connected' | 'auth_expired' | 'forbidden' | 'not_found' | 'conflict' | 'unavailable' | 'unsupported'
+
 export class RevisoHttpError extends Error {
+  readonly status: number
+  readonly code: RevisoErrorCode
+  readonly retryable: boolean
+  readonly requestId?: string
+  readonly details?: unknown
+  readonly diagnosticCode?: string
+
   constructor(
-    readonly status: number,
+    status: number,
     message: string,
-    readonly code = 'request_failed',
-    readonly retryable = status === 408 || status === 425 || status === 429 || status >= 500,
-    readonly requestId?: string,
-    readonly details?: unknown,
+    code?: string,
+    retryable = status === 408 || status === 425 || status === 429 || (status >= 500 && status !== 501),
+    requestId?: string,
+    details?: unknown,
   ) {
     super(message)
     this.name = 'RevisoHttpError'
+    this.status = status
+    this.code = normalizeErrorCode(status, code)
+    this.retryable = retryable
+    this.requestId = requestId
+    this.details = details
+    if (code !== undefined && code !== '' && !isTaxonomyCode(code)) this.diagnosticCode = code
   }
+}
+
+function normalizeErrorCode(status: number, bodyCode: string | undefined): RevisoErrorCode {
+  if (status === 401) return 'auth_expired'
+  if (status === 403) return 'forbidden'
+  if (status === 404 || status === 410) return 'not_found'
+  if (status === 409) return 'conflict'
+  if (status === 501) return 'unsupported'
+  if (status === 400 || status === 422) return 'unsupported'
+  if (status === 408 || status === 425 || status === 429 || status >= 500) return 'unavailable'
+  return isTaxonomyCode(bodyCode) ? bodyCode : 'unavailable'
+}
+
+const ERROR_CODES = new Set<RevisoErrorCode>([
+  'not_connected', 'auth_expired', 'forbidden', 'not_found', 'conflict', 'unavailable', 'unsupported',
+])
+
+function isTaxonomyCode(value: string | undefined): value is RevisoErrorCode {
+  return value !== undefined && ERROR_CODES.has(value as RevisoErrorCode)
 }
 
 export async function documentContent(documentId: string): Promise<RevisoDocumentContent> {

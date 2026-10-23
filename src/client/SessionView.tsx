@@ -100,7 +100,7 @@ export function RevisoSessionView(props: SessionViewProps) {
 
   function loadEmbed(doc: SessionDoc): void {
     setEmbeds(current => ({ ...current, [doc.id]: { status: 'loading' } }))
-    void embedSession(doc.id, preferredTheme())
+    void embedSession(doc.id, preferredTheme(), embedOrigin || undefined)
       .then(data => {
         setEmbeds(current => ({
           ...current,
@@ -144,6 +144,7 @@ export function RevisoSessionView(props: SessionViewProps) {
   }
   const [status, setStatus] = useState<RevisoStatus>('unconfigured')
   const [message, setMessage] = useState('')
+  const [embedOrigin, setEmbedOrigin] = useState('')
   const [docs, setDocs] = useState<SessionDoc[]>([])
   const [reloadKey, setReloadKey] = useState(0)
   const [openDocs, setOpenDocs] = useState<SessionDoc[]>([])
@@ -174,6 +175,7 @@ export function RevisoSessionView(props: SessionViewProps) {
       setStatus('loading')
       try {
         const connection = await connectionStatus()
+        if (alive) setEmbedOrigin(connection.capabilities?.embedOrigin || '')
         if (!connection.connected) {
           if (alive) { setStatus('unconfigured'); setDocs([]); setMessage('') }
           return

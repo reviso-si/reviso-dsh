@@ -218,7 +218,7 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
     setMobileView('reader')
     if (embeds[doc.id]?.status === 'live' || embeds[doc.id]?.status === 'loading') return
     setEmbeds(current => ({ ...current, [doc.id]: { status: 'loading' } }))
-    void embedSession(doc.id, 'system')
+    void embedSession(doc.id, 'system', connection?.capabilities?.embedOrigin || undefined)
       .then(data => setEmbeds(current => ({ ...current, [doc.id]: { status: 'live', url: data.embed_url, sessionId: data.session_id } })))
       .catch(async error => {
         if (error instanceof RevisoHttpError && (error.status === 404 || error.status === 501)) {

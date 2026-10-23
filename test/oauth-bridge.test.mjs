@@ -28,6 +28,7 @@ function request(url, host = '127.0.0.1:3080', options = {}) {
 function setupBridge() {
   const routes = new Map()
   const values = new Map()
+  let dispose
   const ctx = {
     webServer: {
       register(route) {
@@ -50,15 +51,15 @@ function setupBridge() {
       },
     },
   }
-  createOAuthBridge(ctx, { server: 'https://reviso.work' })
-  return { routes, values }
+  dispose = createOAuthBridge(ctx, { server: 'https://reviso.work' })
+  return { routes, values, dispose: () => dispose() }
 }
 
-function installFetch() {
+function installFetch(control = {}) {
   const calls = []
   const saved = globalThis.fetch
-  globalThis.fetch = async (url, options = {}) => {
-    calls.push({ url: String(url), options })
+  globalThis.fetch = async (url, requestOptions = {}) => {
+    calls.push({ url: String(url), options: requestOptions })
     if (String(url).endsWith('/.well-known/oauth-authorization-server')) {
       return json(200, {
         issuer: 'https://reviso.work',
@@ -71,7 +72,7 @@ function installFetch() {
     }
     if (String(url).endsWith('/oauth/register')) return json(201, { client_id: 'client_1' })
     if (String(url).endsWith('/oauth/token')) {
-      const body = String(options.body || '')
+      const body = String(requestOptions.body || '')
       if (body.includes('grant_type=refresh_token')) {
         return json(200, {
           access_token: 'rak_refreshed',
@@ -97,10 +98,26 @@ function installFetch() {
       return json(200, { connection: { id: 'con_1', active: false } })
     }
     if (String(url).endsWith('/api/embed/v1/sessions/ems_abcdef123456/revoke')) {
+      if (control.failEmbed === 'ems_abcdef123456') {
+        return json(503, { error: { code: 'temporarily_unavailable', message: 'embed revoke failed' } })
+      }
       return json(200, { session_id: 'ems_abcdef123456', revoked: true })
+    }
+    if (String(url).endsWith('/api/embed/v1/sessions/ems_ffffffffffff/revoke')) {
+      return json(200, { session_id: 'ems_ffffffffffff', revoked: true })
     }
     if (String(url).includes('/api/documents?session_key=dsh:sess_1')) {
       return json(200, { documents: [{ document_id: 'doc_1', title: 'Doc' }] })
+    }
+    if (String(url).endsWith('/api/embed/v1/documents/doc_ffffffffffff/sessions')) {
+      return json(201, {
+        session_id: 'ems_ffffffffffff',
+        document_id: 'doc_ffffffffffff',
+        embed_url: 'https://reviso-api.fly.dev/embed/v1/documents/doc_ffffffffffff?session=ems_ffffffffffff#code=rem_code_secret',
+        code_expires_at: '2026-01-01T00:01:00+00:00',
+        code_expires_in: 60,
+        token_expires_in: 900,
+      })
     }
     if (String(url).endsWith('/api/embed/v1/documents/doc_abcdef123456/sessions')) {
       return json(201, {
@@ -380,7 +397,9 @@ test('runs the OAuth start/callback flow without exposing the token', async () =
 
     const logoutRes = response()
     await routes.get('/plugins/reviso/auth/logout')(request('/plugins/reviso/auth/logout', '127.0.0.1:3080', { headers: { 'x-reviso-dsh-request': '1' } }), logoutRes)
-    assert.deepEqual(JSON.parse(logoutRes.body), { connected: false, remoteRevoked: true })
+    assert.deepEqual(JSON.parse(logoutRes.body), {
+      connected: false, remoteRevoked: true, embedRevoked: true, embedFailures: [],
+    })
     assert.equal(values.size, 0)
     assert.ok(fakeFetch.calls.some(call => call.url.endsWith('/api/agent/connections/con_1/revoke')))
   } finally {
@@ -461,6 +480,80 @@ test('rejects a cross-origin same-site request', async () => {
   }, res)
   assert.equal(res.status, 403)
   assert.match(res.body, /loopback_required/)
+})
+
+
+function embedRequest(documentId) {
+  return {
+    url: '/plugins/reviso/embed-session', method: 'POST',
+    headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-reviso-dsh-request': '1' },
+    body: { document_id: documentId }, socket: { remoteAddress: '127.0.0.1' },
+  }
+}
+
+test('logout continues embed revokes after one failure, reports it, and clears credentials', async () => {
+  const previous = process.env.REVISO_DSH_EMBED_ORIGIN
+  process.env.REVISO_DSH_EMBED_ORIGIN = 'https://reviso-api.fly.dev'
+  const { routes, values } = setupBridge()
+  values.set('REVISO_DSH_TOKEN', 'rak_embed')
+  values.set('REVISO_DSH_SERVER', 'https://reviso.work')
+  values.set('REVISO_DSH_WORKSPACE_ID', 'wsp_personal')
+  values.set('REVISO_DSH_CONNECTION_ID', 'con_1')
+  const fakeFetch = installFetch({ failEmbed: 'ems_abcdef123456' })
+  try {
+    for (const docId of ['doc_abcdef123456', 'doc_ffffffffffff']) {
+      const created = response()
+      await routes.get('/plugins/reviso/embed-session')(embedRequest(docId), created)
+      assert.equal(created.status, 200, created.body)
+    }
+    const logout = response()
+    await routes.get('/plugins/reviso/auth/logout')({
+      url: '/plugins/reviso/auth/logout', method: 'POST', socket: { remoteAddress: '127.0.0.1' },
+      headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-reviso-dsh-request': '1' },
+    }, logout)
+    assert.equal(logout.status, 200, logout.body)
+    const payload = JSON.parse(logout.body)
+    assert.equal(payload.connected, false)
+    assert.equal(payload.remoteRevoked, true)
+    assert.equal(payload.embedRevoked, false)
+    assert.equal(payload.embedFailures.length, 1)
+    assert.equal(payload.embedFailures[0].sessionId, 'ems_abcdef123456')
+    assert.ok(fakeFetch.calls.some(call => call.url.endsWith('/api/embed/v1/sessions/ems_ffffffffffff/revoke')))
+    assert.equal(values.size, 0)
+  } finally {
+    fakeFetch.restore()
+    if (previous === undefined) delete process.env.REVISO_DSH_EMBED_ORIGIN
+    else process.env.REVISO_DSH_EMBED_ORIGIN = previous
+  }
+})
+
+test('bridge disposer revokes two active embeds and continues after one failure', async () => {
+  const previous = process.env.REVISO_DSH_EMBED_ORIGIN
+  process.env.REVISO_DSH_EMBED_ORIGIN = 'https://reviso-api.fly.dev'
+  const { routes, values, dispose } = setupBridge()
+  values.set('REVISO_DSH_TOKEN', 'rak_embed')
+  values.set('REVISO_DSH_SERVER', 'https://reviso.work')
+  values.set('REVISO_DSH_WORKSPACE_ID', 'wsp_personal')
+  const fakeFetch = installFetch({ failEmbed: 'ems_abcdef123456' })
+  try {
+    for (const docId of ['doc_abcdef123456', 'doc_ffffffffffff']) {
+      const created = response()
+      await routes.get('/plugins/reviso/embed-session')(embedRequest(docId), created)
+      assert.equal(created.status, 200, created.body)
+    }
+    const first = await dispose()
+    const second = await dispose()
+    assert.equal(first, second)
+    assert.equal(first.embedFailures.length, 1)
+    assert.equal(routes.size, 0)
+    const revokes = fakeFetch.calls.filter(call => call.url.includes('/api/embed/v1/sessions/'))
+    assert.deepEqual(new Set(revokes.map(call => call.url.split('/sessions/')[1].split('/')[0])), new Set(['ems_abcdef123456', 'ems_ffffffffffff']))
+    assert.ok(revokes.every(call => call.options.headers.Authorization === 'Bearer rak_embed'))
+  } finally {
+    fakeFetch.restore()
+    if (previous === undefined) delete process.env.REVISO_DSH_EMBED_ORIGIN
+    else process.env.REVISO_DSH_EMBED_ORIGIN = previous
+  }
 })
 
 test('rejects an unknown OAuth state', async () => {

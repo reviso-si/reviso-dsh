@@ -83,7 +83,24 @@ export function createOAuthBridge(ctx, options = {}) {
       handler: (req, res) => handleDashboard(ctx, req, res, admission),
     }),
   ]
-  return () => { for (const dispose of disposers) dispose() }
+  let disposed
+  let disposing
+  return async function disposeBridge() {
+    if (disposed) return disposed
+    if (disposing !== undefined) return disposing
+    disposing = (async () => {
+      const embedFailures = await revokeActiveEmbeds(ctx, activeEmbeds)
+      for (const dispose of disposers) {
+        try { await dispose() } catch {}
+      }
+      const embedRevoked = [...activeEmbeds].length === 0
+      activeEmbeds.clear()
+      await clearCredential(ctx)
+      disposed = { connected: false, embedRevoked, embedFailures }
+      return disposed
+    })()
+    return disposing
+  }
 }
 
 async function handleStatus(ctx, req, res, admission) {
@@ -311,41 +328,63 @@ async function handleCallback(ctx, req, res, pending) {
 async function handleLogout(ctx, req, res, admission, activeEmbeds = new Set()) {
   if (!requireAdmission(req, res, admission, { mutation: true })) return
   let credential
+  let credentialError = ''
   try {
     credential = await readCredential(ctx, { forceRefresh: true })
   } catch (error) {
-    await clearCredential(ctx)
-    sendJson(res, 200, { connected: false, remoteRevoked: false, message: messageOf(error) })
-    return
+    credentialError = messageOf(error)
   }
-  try {
-    if (credential.connectionId === '') throw new Error('no connection id is available to verify logout')
-    const response = await fetch(
-      `${credential.server}/api/agent/connections/${encodeURIComponent(credential.connectionId)}/revoke`,
-      {
-        method: 'POST',
-        headers: { Accept: 'application/json', Authorization: `Bearer ${credential.token}` },
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      },
-    )
-    const text = await response.text()
-    if (!response.ok) throw errorFromResponse(response.status, text)
-  } catch (error) {
-    sendError(res, error, 502)
-    return
-  }
-  for (const sessionId of activeEmbeds) {
+  let remoteRevoked = false
+  let connectionFailure
+  if (credential !== undefined) {
     try {
-      await authenticatedPost(
-        ctx, `/api/embed/v1/sessions/${encodeURIComponent(sessionId)}/revoke`, {})
-      activeEmbeds.delete(sessionId)
+      if (credential.connectionId === '') throw new Error('no connection id is available to verify logout')
+      const response = await fetch(
+        `${credential.server}/api/agent/connections/${encodeURIComponent(credential.connectionId)}/revoke`,
+        {
+          method: 'POST',
+          headers: { Accept: 'application/json', Authorization: `Bearer ${credential.token}` },
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        },
+      )
+      const text = await response.text()
+      if (!response.ok) throw errorFromResponse(response.status, text)
+      remoteRevoked = true
     } catch (error) {
-      sendError(res, error, 502)
-      return
+      connectionFailure = failureDiagnostic(error)
     }
   }
+  const embedFailures = await revokeActiveEmbeds(ctx, activeEmbeds)
   await clearCredential(ctx)
-  sendJson(res, 200, { connected: false, remoteRevoked: true })
+  sendJson(res, 200, {
+    connected: false,
+    remoteRevoked,
+    embedRevoked: activeEmbeds.size === 0,
+    embedFailures,
+    ...(credentialError === '' ? {} : { message: credentialError }),
+    ...(connectionFailure === undefined ? {} : { connectionFailure }),
+  })
+}
+
+async function revokeActiveEmbeds(ctx, activeEmbeds) {
+  const failures = []
+  for (const sessionId of [...activeEmbeds]) {
+    try {
+      await authenticatedPost(ctx, `/api/embed/v1/sessions/${encodeURIComponent(sessionId)}/revoke`, {})
+      activeEmbeds.delete(sessionId)
+    } catch (error) {
+      failures.push({ sessionId, ...failureDiagnostic(error) })
+    }
+  }
+  return failures
+}
+
+function failureDiagnostic(error) {
+  return {
+    code: error instanceof RevisoApiError ? error.code : 'request_failed',
+    status: error instanceof RevisoApiError ? error.status : 502,
+    message: messageOf(error),
+  }
 }
 
 async function oauthMetadata(server) {
