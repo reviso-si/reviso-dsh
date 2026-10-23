@@ -175,7 +175,8 @@ async function handleEmbedSession(ctx, req, res, admission, activeEmbeds) {
   }
   try {
     const credential = await readCredential(ctx)
-    const embedOrigin = resolveEmbedOrigin(credential.server)
+    const embedOrigin = await discoverEmbedOrigin(ctx, credential.server)
+      .catch(() => resolveEmbedOrigin(credential.server))
     const hostOrigin = requestOrigin(ctx, req)
     const result = await authenticatedPost(
       ctx,
