@@ -25,6 +25,19 @@ const REQUEST_TIMEOUT_MS = 30_000
 const CLI_CREDENTIALS_LIMIT_BYTES = 1024 * 1024
 const refreshFlights = new Map()
 const credentialGenerations = new Map()
+let credentialWriteLock = Promise.resolve()
+
+async function withCredentialWriteLock(work) {
+  const previous = credentialWriteLock
+  let release
+  credentialWriteLock = new Promise(resolve => { release = resolve })
+  await previous
+  try {
+    return await work()
+  } finally {
+    release()
+  }
+}
 
 function credentialKey(server, workspaceId, connectionId) {
   return JSON.stringify([server, workspaceId, connectionId])
@@ -132,20 +145,30 @@ async function performRefresh(ctx, { server, refreshToken, clientId, flightKey, 
     }
   }
 
-  if ((credentialGenerations.get(flightKey) || 0) !== generation
-      || (credentialGenerations.get('*') || 0) !== globalGeneration) {
-    throw new Error('Reviso credential changed during refresh; refresh discarded')
-  }
-  await storeCredential(ctx, {
+  await storeCredentialGuarded(ctx, {
     [TOKEN_REF]: token,
     [REFRESH_REF]: nextRefresh,
     [EXPIRES_REF]: String(expiresAt),
     [CONNECTION_REF]: connectionId,
-  })
+  }, flightKey, generation, globalGeneration)
   return { token, refreshToken: nextRefresh, expiresAt, connectionId }
 }
 
 export async function storeCredential(ctx, values) {
+  return withCredentialWriteLock(() => writeCredentialValues(ctx, values))
+}
+
+async function storeCredentialGuarded(ctx, values, flightKey, generation, globalGeneration) {
+  return withCredentialWriteLock(async () => {
+    if ((credentialGenerations.get(flightKey) || 0) !== generation
+        || (credentialGenerations.get('*') || 0) !== globalGeneration) {
+      throw new Error('Reviso credential changed during refresh; refresh discarded')
+    }
+    return writeCredentialValues(ctx, values)
+  })
+}
+
+async function writeCredentialValues(ctx, values) {
   const previous = new Map()
   try {
     for (const [ref, value] of Object.entries(values)) {
@@ -166,18 +189,20 @@ export async function storeCredential(ctx, values) {
 }
 
 export async function clearCredential(ctx) {
-  const server = normalizeServer(await optionalRef(ctx, SERVER_REF))
-  const workspaceId = await optionalRef(ctx, WORKSPACE_REF)
-  const connectionId = await optionalRef(ctx, CONNECTION_REF)
-  bumpCredentialGeneration(server === '' ? '*' : credentialKey(server, workspaceId, connectionId))
-  for (const ref of [TOKEN_REF, WORKSPACE_REF, SERVER_REF, REFRESH_REF,
-    EXPIRES_REF, CLIENT_REF, CONNECTION_REF]) {
-    try {
-      await ctx.credentials.unset(ref)
-    } catch {
-      // A read-only env layer may shadow a ref; clearing the rest still helps.
+  return withCredentialWriteLock(async () => {
+    const server = normalizeServer(await optionalRef(ctx, SERVER_REF))
+    const workspaceId = await optionalRef(ctx, WORKSPACE_REF)
+    const connectionId = await optionalRef(ctx, CONNECTION_REF)
+    bumpCredentialGeneration(server === '' ? '*' : credentialKey(server, workspaceId, connectionId))
+    for (const ref of [TOKEN_REF, WORKSPACE_REF, SERVER_REF, REFRESH_REF,
+      EXPIRES_REF, CLIENT_REF, CONNECTION_REF]) {
+      try {
+        await ctx.credentials.unset(ref)
+      } catch {
+        // A read-only env layer may shadow a ref; clearing the rest still helps.
+      }
     }
-  }
+  })
 }
 
 export async function resolvePersonalWorkspace(server, token) {
