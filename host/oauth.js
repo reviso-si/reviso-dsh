@@ -108,6 +108,9 @@ async function handleStatus(ctx, req, res, admission) {
   const token = await describe(ctx, TOKEN_REF)
   const server = await resolveRef(ctx, SERVER_REF)
   const workspaceId = await resolveRef(ctx, WORKSPACE_REF)
+  const advertisedEmbedOrigin = token.configured
+    ? await discoverEmbedOrigin(ctx, server).catch(() => resolveEmbedOrigin(server))
+    : resolveEmbedOrigin(server)
   sendJson(res, 200, {
     connected: token.configured && server !== '' && workspaceId !== '',
     server,
@@ -115,7 +118,7 @@ async function handleStatus(ctx, req, res, admission) {
     generation: publishedGeneration(server, workspaceId),
     capabilities: {
       embed: process.env.REVISO_DSH_EMBED_CAPABILITY || 'unknown',
-      embedOrigin: resolveEmbedOrigin(server),
+      embedOrigin: advertisedEmbedOrigin,
     },
   })
 }
@@ -541,6 +544,13 @@ function callbackOrigin(ctx, req) {
   const host = String(req.headers.host || '')
   if (!isTrustedLoopbackAuthority(host)) throw new Error('loopback web origin required')
   return `http://${host}`
+}
+
+async function discoverEmbedOrigin(ctx, server) {
+  const body = await authenticatedGet(ctx, '/api/config')
+  const configured = normalizeServer(String(body.embed_origin || ''))
+  if (configured !== '' && new URL(configured).protocol === 'https:') return configured
+  return resolveEmbedOrigin(server)
 }
 
 function resolveEmbedOrigin(server) {

@@ -91,6 +91,9 @@ function installFetch(control = {}) {
         workspaces: [{ workspace_id: 'wsp_personal', workspace_type: 'personal' }],
       })
     }
+    if (String(url).endsWith('/api/config')) {
+      return json(200, { embed_origin: 'https://reviso-api.fly.dev', public_url: 'https://reviso.work' })
+    }
     if (String(url).endsWith('/api/agent-connection/self')) {
       return json(200, { connection: { id: 'con_1' } })
     }
