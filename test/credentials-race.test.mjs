@@ -5,7 +5,56 @@ import {
   clearCredential, readCredential,
 } from '../host/credentials.js'
 
-test('logout generation fences an in-flight refresh from resurrecting credentials', async () => {
+test('logout fences an in-flight refresh at the final credential commit', async () => {
+  const values = new Map([
+    [TOKEN_REF, 'rak_old'],
+    [WORKSPACE_REF, 'wsp_1'],
+    [SERVER_REF, 'https://reviso.work'],
+    [REFRESH_REF, 'rft_old'],
+    [EXPIRES_REF, '1'],
+  ])
+  let paused = false
+  let releaseSet
+  const ctx = {
+    credentials: {
+      async describe(ref) { return { configured: values.has(ref), writable: true } },
+      async resolve(ref) { return values.has(ref) ? { value: values.get(ref), source: 'test' } : undefined },
+      async set(ref, value) {
+        if (!paused && ref === TOKEN_REF && value === 'rak_refreshed') {
+          paused = true
+          await new Promise(resolve => { releaseSet = resolve })
+        }
+        values.set(ref, value)
+      },
+      async unset(ref) {
+        if (!paused && ref === REFRESH_REF) {
+          paused = true
+          await new Promise(resolve => { releaseSet = resolve })
+        }
+        values.delete(ref)
+      },
+    },
+  }
+  const savedFetch = globalThis.fetch
+  globalThis.fetch = async url => {
+    if (String(url).endsWith('/oauth/token')) {
+      return new Response(JSON.stringify({ access_token: 'rak_refreshed', refresh_token: 'rft_refreshed', expires_in: 3600 }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+    return new Response(JSON.stringify({ connection: { id: 'con_1' } }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }
+  try {
+    const pending = readCredential(ctx).catch(error => error)
+    while (typeof releaseSet !== 'function') await new Promise(resolve => setTimeout(resolve, 0))
+    const logout = clearCredential(ctx)
+    releaseSet()
+    await pending
+    await logout
+    assert.equal(values.has(TOKEN_REF), false)
+    assert.equal(values.has(REFRESH_REF), false)
+  } finally { globalThis.fetch = savedFetch }
+})
+
+test('older refresh result cannot resurrect after logout', async () => {
   const values = new Map([
     [TOKEN_REF, 'rak_old'],
     [WORKSPACE_REF, 'wsp_1'],

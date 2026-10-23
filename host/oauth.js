@@ -34,6 +34,7 @@ export function createOAuthBridge(ctx, options = {}) {
   if (defaultServer === '') throw new Error('Reviso bridge server must be an HTTPS origin')
   const pending = new Map()
   const clients = new Map()
+  const activeEmbeds = new Set()
   const admission = bridgeAdmission(ctx)
   const disposers = [
     ctx.webServer.register({
@@ -54,7 +55,7 @@ export function createOAuthBridge(ctx, options = {}) {
     ctx.webServer.register({
       kind: 'exact',
       path: '/plugins/reviso/auth/logout',
-      handler: (req, res) => handleLogout(ctx, req, res, admission),
+      handler: (req, res) => handleLogout(ctx, req, res, admission, activeEmbeds),
     }),
     ctx.webServer.register({
       kind: 'exact',
@@ -69,12 +70,12 @@ export function createOAuthBridge(ctx, options = {}) {
     ctx.webServer.register({
       kind: 'exact',
       path: '/plugins/reviso/embed-session',
-      handler: (req, res) => handleEmbedSession(ctx, req, res, admission),
+      handler: (req, res) => handleEmbedSession(ctx, req, res, admission, activeEmbeds),
     }),
     ctx.webServer.register({
       kind: 'exact',
       path: '/plugins/reviso/embed-session/revoke',
-      handler: (req, res) => handleEmbedRevoke(ctx, req, res, admission),
+      handler: (req, res) => handleEmbedRevoke(ctx, req, res, admission, activeEmbeds),
     }),
     ctx.webServer.register({
       kind: 'exact',
@@ -134,7 +135,7 @@ async function handleDocument(ctx, req, res, admission) {
   }
 }
 
-async function handleEmbedSession(ctx, req, res, admission) {
+async function handleEmbedSession(ctx, req, res, admission, activeEmbeds) {
   if (!requireAdmission(req, res, admission, { mutation: true })) return
   if ((req.method || 'POST') !== 'POST') {
     sendJson(res, 405, { error: 'method_not_allowed' })
@@ -167,13 +168,15 @@ async function handleEmbedSession(ctx, req, res, admission) {
         locale: String(body.locale || 'en').slice(0, 24),
       },
     )
-    sendJson(res, 200, validateEmbedSession(result, embedOrigin, documentId))
+    const validated = validateEmbedSession(result, embedOrigin, documentId)
+    activeEmbeds.add(validated.session_id)
+    sendJson(res, 200, validated)
   } catch (error) {
     sendError(res, error)
   }
 }
 
-async function handleEmbedRevoke(ctx, req, res, admission) {
+async function handleEmbedRevoke(ctx, req, res, admission, activeEmbeds) {
   if (!requireAdmission(req, res, admission, { mutation: true })) return
   if ((req.method || 'POST') !== 'POST') {
     sendJson(res, 405, { error: 'method_not_allowed', code: 'unsupported', retryable: false })
@@ -190,8 +193,10 @@ async function handleEmbedRevoke(ctx, req, res, admission) {
     return
   }
   try {
-    sendJson(res, 200, await authenticatedPost(
-      ctx, `/api/embed/v1/sessions/${encodeURIComponent(sessionId)}/revoke`, {}))
+    const result = await authenticatedPost(
+      ctx, `/api/embed/v1/sessions/${encodeURIComponent(sessionId)}/revoke`, {})
+    activeEmbeds.delete(sessionId)
+    sendJson(res, 200, result)
   } catch (error) { sendError(res, error) }
 }
 
@@ -303,7 +308,7 @@ async function handleCallback(ctx, req, res, pending) {
   }
 }
 
-async function handleLogout(ctx, req, res, admission) {
+async function handleLogout(ctx, req, res, admission, activeEmbeds = new Set()) {
   if (!requireAdmission(req, res, admission, { mutation: true })) return
   let credential
   try {
@@ -328,6 +333,16 @@ async function handleLogout(ctx, req, res, admission) {
   } catch (error) {
     sendError(res, error, 502)
     return
+  }
+  for (const sessionId of activeEmbeds) {
+    try {
+      await authenticatedPost(
+        ctx, `/api/embed/v1/sessions/${encodeURIComponent(sessionId)}/revoke`, {})
+      activeEmbeds.delete(sessionId)
+    } catch (error) {
+      sendError(res, error, 502)
+      return
+    }
   }
   await clearCredential(ctx)
   sendJson(res, 200, { connected: false, remoteRevoked: true })

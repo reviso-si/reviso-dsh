@@ -168,6 +168,15 @@ async function storeCredentialGuarded(ctx, values, flightKey, generation, global
   })
 }
 
+async function storeCredentialIfGeneration(ctx, values, globalGeneration) {
+  return withCredentialWriteLock(async () => {
+    if ((credentialGenerations.get('*') || 0) !== globalGeneration) {
+      throw new Error('Reviso credential changed during fallback promotion; promotion discarded')
+    }
+    return writeCredentialValues(ctx, values)
+  })
+}
+
 async function writeCredentialValues(ctx, values) {
   const previous = new Map()
   try {
@@ -255,6 +264,7 @@ export function normalizeExpiry(value) {
 }
 
 async function readCliCredential(ctx, fallbackServer) {
+  const globalGeneration = credentialGenerations.get('*') || 0
   const configured = process.env.REVISO_DSH_CLI_CREDENTIALS
     || join(process.env.REVISO_CONFIG_DIR || join(homedir(), '.config', 'reviso'), 'credentials.json')
   const path = isAbsolute(configured) ? configured : resolve(configured)
@@ -304,7 +314,7 @@ async function readCliCredential(ctx, fallbackServer) {
     // Promote the complete credential set. Otherwise a rotated CLI refresh
     // token would remain stale on disk and the next fallback would reuse a
     // consumed token.
-    await storeCredential(ctx, {
+    await storeCredentialIfGeneration(ctx, {
       [TOKEN_REF]: token,
       [WORKSPACE_REF]: workspaceId,
       [SERVER_REF]: server,
@@ -312,7 +322,7 @@ async function readCliCredential(ctx, fallbackServer) {
       [EXPIRES_REF]: String(expiresAt),
       [CLIENT_REF]: clientId,
       [CONNECTION_REF]: connectionId,
-    })
+    }, globalGeneration)
   }
   return credential
 }

@@ -231,6 +231,37 @@ test('revokes an embed session through the authenticated host route', async () =
   } finally { fakeFetch.restore() }
 })
 
+test('logout revokes active embed sessions before clearing credentials', async () => {
+  const previous = process.env.REVISO_DSH_EMBED_ORIGIN
+  process.env.REVISO_DSH_EMBED_ORIGIN = 'https://reviso-api.fly.dev'
+  const { routes, values } = setupBridge()
+  values.set('REVISO_DSH_TOKEN', 'rak_embed')
+  values.set('REVISO_DSH_SERVER', 'https://reviso.work')
+  values.set('REVISO_DSH_WORKSPACE_ID', 'wsp_personal')
+  values.set('REVISO_DSH_CONNECTION_ID', 'con_1')
+  const fakeFetch = installFetch()
+  try {
+    const created = response()
+    await routes.get('/plugins/reviso/embed-session')({
+      url: '/plugins/reviso/embed-session', method: 'POST',
+      headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-reviso-dsh-request': '1' },
+      body: { document_id: 'doc_abcdef123456' }, socket: { remoteAddress: '127.0.0.1' },
+    }, created)
+    assert.equal(created.status, 200, created.body)
+    const logout = response()
+    await routes.get('/plugins/reviso/auth/logout')({
+      url: '/plugins/reviso/auth/logout', method: 'POST', socket: { remoteAddress: '127.0.0.1' },
+      headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-reviso-dsh-request': '1' },
+    }, logout)
+    assert.equal(logout.status, 200, logout.body)
+    assert.ok(fakeFetch.calls.some(call => call.url.endsWith('/api/embed/v1/sessions/ems_abcdef123456/revoke')))
+  } finally {
+    fakeFetch.restore()
+    if (previous === undefined) delete process.env.REVISO_DSH_EMBED_ORIGIN
+    else process.env.REVISO_DSH_EMBED_ORIGIN = previous
+  }
+})
+
 test('runs the OAuth start/callback flow without exposing the token', async () => {
   const previousEmbedOrigin = process.env.REVISO_DSH_EMBED_ORIGIN
   process.env.REVISO_DSH_EMBED_ORIGIN = 'https://reviso-api.fly.dev'

@@ -155,6 +155,7 @@ export async function revokeEmbedSession(sessionId: string): Promise<void> {
 export async function embedSession(
   documentId: string,
   theme: 'light' | 'dark' | 'system',
+  expectedOrigin?: string,
 ): Promise<RevisoEmbedSession> {
   const res = await fetch('/plugins/reviso/embed-session', {
     method: 'POST',
@@ -168,7 +169,7 @@ export async function embedSession(
   })
   if (!res.ok) throw await responseError(res, 'embed session')
   const body = await res.json() as RevisoEmbedSession
-  validateEmbedUrl(body.embed_url)
+  validateEmbedUrl(body.embed_url, body.document_id, body.session_id, expectedOrigin)
   return body
 }
 
@@ -186,11 +187,18 @@ async function responseError(res: Response, fallback: string): Promise<RevisoHtt
   )
 }
 
-function validateEmbedUrl(value: string): void {
+function validateEmbedUrl(value: string, documentId: string, sessionId: string, expectedOrigin?: string): void {
   let url: URL
   try { url = new URL(value) } catch { throw new Error('invalid Reviso embed URL') }
   if (url.protocol !== 'https:' || url.username !== '' || url.password !== '') {
     throw new Error('invalid Reviso embed URL')
+  }
+  if (expectedOrigin !== undefined && url.origin !== expectedOrigin) {
+    throw new Error('invalid Reviso embed origin')
+  }
+  if (url.pathname !== `/embed/v1/documents/${documentId}`
+      || url.searchParams.get('session') !== sessionId) {
+    throw new Error('invalid Reviso embed identity')
   }
 }
 
