@@ -596,11 +596,15 @@ async function readJsonRequest(req) {
 }
 
 function bridgeAdmission(ctx) {
-  const connection = ctx.connection
-  if (connection?.admit !== undefined) {
-    return req => connection.admit(req)
+  return req => {
+    let connection
+    try {
+      connection = typeof ctx.get === 'function' ? ctx.get('connection') : ctx.connection
+    } catch {
+      connection = undefined
+    }
+    return connection?.admit?.(req)
   }
-  return undefined
 }
 
 function requireAdmission(req, res, admit, { mutation = false } = {}) {
