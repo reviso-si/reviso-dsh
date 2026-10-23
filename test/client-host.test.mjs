@@ -52,6 +52,13 @@ test('empty and legacy error bodies normalize by HTTP status', async () => {
   )
 })
 
+test('valid host taxonomy codes survive conflicting HTTP status', () => {
+  for (const [status, code] of [[502, 'not_connected'], [403, 'conflict'], [400, 'not_connected']]) {
+    const error = new RevisoHttpError(status, 'host normalized', code)
+    assert.equal(error.code, code)
+  }
+})
+
 test('legacy request_failed on a non-2xx status cannot bypass the taxonomy', async () => {
   globalThis.fetch = async () => new Response(JSON.stringify({
     error: 'legacy failure',

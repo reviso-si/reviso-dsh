@@ -94,7 +94,14 @@ function installFetch(control = {}) {
     if (String(url).endsWith('/api/agent-connection/self')) {
       return json(200, { connection: { id: 'con_1' } })
     }
-    if (String(url).includes('/api/agent/connections/con_1/revoke')) {
+    if (String(url).endsWith('/api/agent-connection/self/revoke')) {
+      const revoked = calls.filter(call => (
+        call.url.endsWith('/api/embed/v1/sessions/ems_abcdef123456/revoke')
+        || call.url.endsWith('/api/embed/v1/sessions/ems_ffffffffffff/revoke')
+      ))
+      if (control.invalidateOnConnectionRevoke && revoked.length === 0) {
+        return json(409, { error: { code: 'conflict', message: 'embed revokes must precede connection revoke' } })
+      }
       return json(200, { connection: { id: 'con_1', active: false } })
     }
     if (String(url).endsWith('/api/embed/v1/sessions/ems_abcdef123456/revoke')) {
@@ -401,7 +408,7 @@ test('runs the OAuth start/callback flow without exposing the token', async () =
       connected: false, remoteRevoked: true, embedRevoked: true, embedFailures: [],
     })
     assert.equal(values.size, 0)
-    assert.ok(fakeFetch.calls.some(call => call.url.endsWith('/api/agent/connections/con_1/revoke')))
+    assert.ok(fakeFetch.calls.some(call => call.url.endsWith('/api/agent-connection/self/revoke')))
   } finally {
     fakeFetch.restore()
   }
@@ -499,7 +506,7 @@ test('logout continues embed revokes after one failure, reports it, and clears c
   values.set('REVISO_DSH_SERVER', 'https://reviso.work')
   values.set('REVISO_DSH_WORKSPACE_ID', 'wsp_personal')
   values.set('REVISO_DSH_CONNECTION_ID', 'con_1')
-  const fakeFetch = installFetch({ failEmbed: 'ems_abcdef123456' })
+  const fakeFetch = installFetch({ failEmbed: 'ems_abcdef123456', invalidateOnConnectionRevoke: true })
   try {
     for (const docId of ['doc_abcdef123456', 'doc_ffffffffffff']) {
       const created = response()

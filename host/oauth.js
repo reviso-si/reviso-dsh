@@ -334,13 +334,13 @@ async function handleLogout(ctx, req, res, admission, activeEmbeds = new Set()) 
   } catch (error) {
     credentialError = messageOf(error)
   }
+  const embedFailures = await revokeActiveEmbeds(ctx, activeEmbeds)
   let remoteRevoked = false
   let connectionFailure
   if (credential !== undefined) {
     try {
-      if (credential.connectionId === '') throw new Error('no connection id is available to verify logout')
       const response = await fetch(
-        `${credential.server}/api/agent/connections/${encodeURIComponent(credential.connectionId)}/revoke`,
+        `${credential.server}/api/agent-connection/self/revoke`,
         {
           method: 'POST',
           headers: { Accept: 'application/json', Authorization: `Bearer ${credential.token}` },
@@ -354,7 +354,6 @@ async function handleLogout(ctx, req, res, admission, activeEmbeds = new Set()) 
       connectionFailure = failureDiagnostic(error)
     }
   }
-  const embedFailures = await revokeActiveEmbeds(ctx, activeEmbeds)
   await clearCredential(ctx)
   sendJson(res, 200, {
     connected: false,

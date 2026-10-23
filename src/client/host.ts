@@ -155,6 +155,7 @@ export class RevisoHttpError extends Error {
 }
 
 function normalizeErrorCode(status: number, bodyCode: string | undefined): RevisoErrorCode {
+  if (isTaxonomyCode(bodyCode)) return bodyCode
   if (status === 401) return 'auth_expired'
   if (status === 403) return 'forbidden'
   if (status === 404 || status === 410) return 'not_found'
