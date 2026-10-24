@@ -81,6 +81,7 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
   const [loadingMore, setLoadingMore] = useState(false)
   const [loadMoreError, setLoadMoreError] = useState('')
   const [message, setMessage] = useState('')
+  const [revokeMessage, setRevokeMessage] = useState('')
   const [query, setQuery] = useState('')
   const [kindFilter, setKindFilter] = useState<KindFilter>('all')
   const [sessionFilter, setSessionFilter] = useState('')
@@ -98,14 +99,18 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
       .map(embed => embed.sessionId).filter((id): id is string => id !== undefined))
   }, [embeds])
 
+  function surfaceRevokeError(error: unknown): void {
+    setRevokeMessage(`${t('doc.revokeError')}: ${error instanceof Error ? error.message : String(error)}`)
+  }
+
   function revokeEmbed(documentId: string): void {
     const sessionId = embeds[documentId]?.sessionId
-    if (sessionId !== undefined) void revokeEmbedSession(sessionId).catch(() => {})
+    if (sessionId !== undefined) void revokeEmbedSession(sessionId).catch(surfaceRevokeError)
   }
 
   useEffect(() => () => {
     for (const sessionId of embedSessions.current) {
-      void revokeEmbedSession(sessionId).catch(() => {})
+      void revokeEmbedSession(sessionId).catch(surfaceRevokeError)
     }
   }, [])
 
@@ -120,7 +125,7 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
         setConnection(state)
         if (setDashboardCacheScope(state)) {
           for (const sessionId of embedSessions.current) {
-            void revokeEmbedSession(sessionId).catch(() => {})
+            void revokeEmbedSession(sessionId).catch(surfaceRevokeError)
           }
           setActiveId(null)
           setEmbeds({})
@@ -280,6 +285,7 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
       </div>
 
       {status === 'error' && <div className='rs-global-error'><span>{t('global.listError')}: {message}</span><button type='button' className='rs-text-btn' onClick={refresh}>{t('action.retry')}</button></div>}
+      {revokeMessage !== '' && <div className='rs-global-error' data-state='error'><span>{revokeMessage}</span></div>}
 
       <div className='rs-global-body'>
         <div className='rs-global-list' data-mode={view} role='list'>

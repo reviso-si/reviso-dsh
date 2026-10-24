@@ -25,11 +25,12 @@ function request(url, host = '127.0.0.1:3080', options = {}) {
   }
 }
 
-function setupBridge() {
+function setupBridge(options = {}) {
   const routes = new Map()
   const values = new Map()
   let dispose
   const ctx = {
+    ...(options.noAdmission ? {} : { connection: { admit: () => undefined } }),
     webServer: {
       register(route) {
         routes.set(route.path, route.handler)
@@ -464,6 +465,16 @@ test('refreshes before resolving a missing workspace', async () => {
   } finally {
     fakeFetch.restore()
   }
+})
+
+test('fails closed when authenticated peer admission is unavailable', async () => {
+  const { routes } = setupBridge({ noAdmission: true })
+  const res = response()
+  await routes.get('/plugins/reviso/auth/status')(request('/plugins/reviso/auth/status'), res)
+  assert.equal(res.status, 503)
+  const payload = JSON.parse(res.body)
+  assert.equal(payload.code, 'unavailable')
+  assert.equal(payload.retryable, true)
 })
 
 test('rejects non-loopback socket peers even with a spoofed loopback Host', async () => {

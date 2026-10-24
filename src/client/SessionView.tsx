@@ -133,7 +133,11 @@ export function RevisoSessionView(props: SessionViewProps) {
 
   function closeDocument(docId: string): void {
     const session = embeds[docId]?.sessionId
-    if (session !== undefined) void revokeEmbedSession(session).catch(() => {})
+    if (session !== undefined) {
+      void revokeEmbedSession(session).catch((error: unknown) => {
+        setRevokeMessage(`${t('doc.revokeError')}: ${error instanceof Error ? error.message : String(error)}`)
+      })
+    }
     setOpenDocs(current => current.filter(item => item.id !== docId))
     setActiveDocId(current => current === docId ? null : current)
     setEmbeds(current => {
@@ -144,6 +148,7 @@ export function RevisoSessionView(props: SessionViewProps) {
   }
   const [status, setStatus] = useState<RevisoStatus>('unconfigured')
   const [message, setMessage] = useState('')
+  const [revokeMessage, setRevokeMessage] = useState('')
   const [embedOrigin, setEmbedOrigin] = useState('')
   const [docs, setDocs] = useState<SessionDoc[]>([])
   const [reloadKey, setReloadKey] = useState(0)
@@ -160,7 +165,11 @@ export function RevisoSessionView(props: SessionViewProps) {
 
   useEffect(() => {
     for (const embed of Object.values(embeds)) {
-      if (embed.sessionId !== undefined) void revokeEmbedSession(embed.sessionId).catch(() => {})
+      if (embed.sessionId !== undefined) {
+        void revokeEmbedSession(embed.sessionId).catch((error: unknown) => {
+          setRevokeMessage(`${t('doc.revokeError')}: ${error instanceof Error ? error.message : String(error)}`)
+        })
+      }
     }
     setOpenDocs([])
     setActiveDocId(null)
@@ -265,9 +274,9 @@ export function RevisoSessionView(props: SessionViewProps) {
             ))}
           </div>
         )}
-        {message !== '' && (
-          <div className='rs-session-message' data-state={status === 'error' ? 'error' : undefined}>
-            {message}
+        {(message !== '' || revokeMessage !== '') && (
+          <div className='rs-session-message' data-state={status === 'error' || revokeMessage !== '' ? 'error' : undefined}>
+            {message !== '' ? message : revokeMessage}
           </div>
         )}
         {openDocs.map(doc => {

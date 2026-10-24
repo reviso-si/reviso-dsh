@@ -26,9 +26,21 @@ test('global browser ships cache, source-session, view-mode, and security contra
     'allow-scripts',
     'request_id',
     'retryable',
+    'doc.revokeError',
   ]) assert.ok(bundle.includes(marker) || bundle.includes('global.sortCreator'), marker)
   assert.equal(bundle.includes('allow-same-origin'), false)
   assert.equal(bundle.includes('allow-popups-to-escape-sandbox'), false)
+})
+
+test('embed revoke failures stay visible in both client surfaces', () => {
+  const sessionView = readFileSync(new URL('../src/client/SessionView.tsx', import.meta.url), 'utf8')
+  const globalPanel = readFileSync(new URL('../src/client/GlobalPanel.tsx', import.meta.url), 'utf8')
+  for (const source of [sessionView, globalPanel]) {
+    assert.equal(source.includes('.catch(() => {})'), false)
+    assert.match(source, /doc\.revokeError/)
+  }
+  assert.match(sessionView, /setRevokeMessage/)
+  assert.match(globalPanel, /setRevokeMessage/)
 })
 
 test('client factory materializes with only the declared DSH shell seeds', () => {

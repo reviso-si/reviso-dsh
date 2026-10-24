@@ -614,7 +614,8 @@ function bridgeAdmission(ctx) {
     } catch {
       connection = undefined
     }
-    return connection?.admit?.(req)
+    if (typeof connection?.admit !== 'function') return { rejection: 503 }
+    return connection.admit(req)
   }
 }
 
@@ -626,10 +627,13 @@ function requireAdmission(req, res, admit, { mutation = false } = {}) {
   if (admit !== undefined) {
     const value = admit(req)
     if (value?.rejection !== undefined) {
+      const unavailable = value.rejection === 503
       sendJson(res, value.rejection, {
-        error: value.rejection === 401 ? 'authentication_required' : 'request_forbidden',
-        code: value.rejection === 401 ? 'auth_expired' : 'forbidden',
-        retryable: false,
+        error: value.rejection === 401
+          ? 'authentication_required'
+          : unavailable ? 'authenticated peer admission unavailable' : 'request_forbidden',
+        code: value.rejection === 401 ? 'auth_expired' : unavailable ? 'unavailable' : 'forbidden',
+        retryable: unavailable,
         status: value.rejection,
       })
       return false
