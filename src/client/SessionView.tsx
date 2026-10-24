@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 type RevisoStatus = 'unconfigured' | 'loading' | 'live' | 'error'
 import { mapRow, sameOrigin, type SessionDoc } from './document.ts'
+import { EmbedFrame } from './EmbedFrame.tsx'
 import { zh, type RevisoLocaleKey } from './locales.ts'
 import {
   connectionStatus, documentContent, embedSession, onRevisoConnected, revokeEmbedSession, sessionDocuments, startRevisoOAuth,
@@ -99,22 +100,36 @@ export function RevisoSessionView(props: SessionViewProps) {
   const t = (key: RevisoLocaleKey): string => props.t?.(key) ?? zh[key]
 
   function loadEmbed(doc: SessionDoc): void {
+    const epoch = sessionEpoch.current
+    const attempt = (embedAttempts.current.get(doc.id) ?? 0) + 1
+    embedAttempts.current.set(doc.id, attempt)
     setEmbeds(current => ({ ...current, [doc.id]: { status: 'loading' } }))
     void embedSession(doc.id, preferredTheme(), embedOrigin || undefined)
       .then(data => {
+        if (!mountedRef.current || sessionEpoch.current !== epoch || !openDocIds.current.has(doc.id)
+            || embedAttempts.current.get(doc.id) !== attempt) {
+          void revokeEmbedSession(data.session_id).catch(() => undefined)
+          return
+        }
         setEmbeds(current => ({
           ...current,
           [doc.id]: { status: 'live', url: data.embed_url, sessionId: data.session_id },
         }))
       })
       .catch(async (error: unknown) => {
+        const stale = () => !mountedRef.current || sessionEpoch.current !== epoch
+          || !openDocIds.current.has(doc.id)
+          || embedAttempts.current.get(doc.id) !== attempt
+        if (stale()) return
         if (error instanceof RevisoHttpError && (error.status === 404 || error.status === 501)) {
           try {
             const content = await documentContent(doc.id)
+            if (stale()) return
             setEmbeds(current => ({ ...current, [doc.id]: { status: 'fallback', content } }))
             return
           } catch {}
         }
+        if (stale()) return
         setEmbeds(current => ({
           ...current,
           [doc.id]: {
@@ -126,6 +141,7 @@ export function RevisoSessionView(props: SessionViewProps) {
   }
 
   function openDocument(doc: SessionDoc): void {
+    openDocIds.current.add(doc.id)
     setOpenDocs(current => current.some(item => item.id === doc.id) ? current : [...current, doc])
     setActiveDocId(doc.id)
     if (embeds[doc.id]?.status !== 'live') loadEmbed(doc)
@@ -138,6 +154,8 @@ export function RevisoSessionView(props: SessionViewProps) {
         setRevokeMessage(`${t('doc.revokeError')}: ${error instanceof Error ? error.message : String(error)}`)
       })
     }
+    openDocIds.current.delete(docId)
+    embedAttempts.current.set(docId, (embedAttempts.current.get(docId) ?? 0) + 1)
     setOpenDocs(current => current.filter(item => item.id !== docId))
     setActiveDocId(current => current === docId ? null : current)
     setEmbeds(current => {
@@ -155,6 +173,11 @@ export function RevisoSessionView(props: SessionViewProps) {
   const [openDocs, setOpenDocs] = useState<SessionDoc[]>([])
   const [activeDocId, setActiveDocId] = useState<string | null>(null)
   const iframeRefs = useRef(new Map<string, HTMLIFrameElement>())
+  const embedSessions = useRef(new Set<string>())
+  const openDocIds = useRef(new Set<string>())
+  const sessionEpoch = useRef(0)
+  const mountedRef = useRef(true)
+  const embedAttempts = useRef(new Map<string, number>())
   const [embeds, setEmbeds] = useState<Record<string, {
     status: 'loading' | 'live' | 'fallback' | 'error'
     url?: string
@@ -164,6 +187,24 @@ export function RevisoSessionView(props: SessionViewProps) {
   }>>({})
 
   useEffect(() => {
+    embedSessions.current = new Set(Object.values(embeds)
+      .map(embed => embed.sessionId).filter((id): id is string => id !== undefined))
+  }, [embeds])
+
+  useEffect(() => {
+    openDocIds.current = new Set(openDocs.map(doc => doc.id))
+  }, [openDocs])
+
+  useEffect(() => () => {
+    mountedRef.current = false
+    for (const session of embedSessions.current) {
+      void revokeEmbedSession(session).catch(() => undefined)
+    }
+  }, [])
+
+  useEffect(() => {
+    sessionEpoch.current += 1
+    embedAttempts.current.clear()
     for (const embed of Object.values(embeds)) {
       if (embed.sessionId !== undefined) {
         void revokeEmbedSession(embed.sessionId).catch((error: unknown) => {
@@ -171,6 +212,7 @@ export function RevisoSessionView(props: SessionViewProps) {
         })
       }
     }
+    openDocIds.current = new Set()
     setOpenDocs([])
     setActiveDocId(null)
     setEmbeds({})
@@ -285,17 +327,15 @@ export function RevisoSessionView(props: SessionViewProps) {
             <div className='rs-reader-view' hidden={activeDocId !== doc.id} key={doc.id}>
               {embed?.status === 'live' && embed.url !== undefined
                 ? (
-                    <iframe
-                      ref={node => {
+                    <EmbedFrame
+                      frameRef={node => {
                         if (node === null) iframeRefs.current.delete(doc.id)
                         else iframeRefs.current.set(doc.id, node)
                       }}
-                      className='rs-embed-frame' title={doc.title}
-                      src={embed.url}
-                      sandbox='allow-scripts'
-                      allow='fullscreen'
-                      referrerPolicy='no-referrer'
-                      loading='eager' />
+                      className='rs-embed-frame'
+                      title={doc.title}
+                      url={embed.url}
+                    />
                   )
                 : embed?.status === 'fallback'
                   ? (

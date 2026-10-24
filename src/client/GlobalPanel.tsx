@@ -5,6 +5,7 @@ import {
   type RevisoConnectionStatus, type RevisoDocumentContent,
 } from './host.ts'
 import { mapRow, sameOrigin, type SessionDoc } from './document.ts'
+import { EmbedFrame } from './EmbedFrame.tsx'
 import { FileIcon } from './SessionView.tsx'
 import { zh, type RevisoLocaleKey } from './locales.ts'
 import { ensureStyles } from './readerStyles.ts'
@@ -93,6 +94,9 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
   const iframeRefs = useRef(new Map<string, HTMLIFrameElement>())
   const [mobileView, setMobileView] = useState<'list' | 'reader'>('list')
   const embedSessions = useRef(new Set<string>())
+  const activeIdRef = useRef<string | null>(null)
+  const disposedRef = useRef(false)
+  const embedAttempts = useRef(new Map<string, number>())
 
   useEffect(() => {
     embedSessions.current = new Set(Object.values(embeds)
@@ -100,7 +104,12 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
   }, [embeds])
 
   function surfaceRevokeError(error: unknown): void {
+    if (disposedRef.current) return
     setRevokeMessage(`${t('doc.revokeError')}: ${error instanceof Error ? error.message : String(error)}`)
+  }
+
+  function invalidateEmbedAttempt(documentId: string): void {
+    embedAttempts.current.set(documentId, (embedAttempts.current.get(documentId) ?? 0) + 1)
   }
 
   function revokeEmbed(documentId: string): void {
@@ -109,8 +118,11 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
   }
 
   useEffect(() => () => {
+    disposedRef.current = true
+    activeIdRef.current = null
+    embedAttempts.current.clear()
     for (const sessionId of embedSessions.current) {
-      void revokeEmbedSession(sessionId).catch(surfaceRevokeError)
+      void revokeEmbedSession(sessionId).catch(() => undefined)
     }
   }, [])
 
@@ -127,7 +139,9 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
           for (const sessionId of embedSessions.current) {
             void revokeEmbedSession(sessionId).catch(surfaceRevokeError)
           }
+          embedAttempts.current.clear()
           setActiveId(null)
+          activeIdRef.current = null
           setEmbeds({})
           iframeRefs.current.clear()
         }
@@ -218,21 +232,45 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
   const active = activeId === null ? undefined : docs.find(doc => doc.id === activeId)
 
   function openDoc(doc: SessionDoc): void {
-    if (activeId !== null && activeId !== doc.id) revokeEmbed(activeId)
+    if (activeId !== null && activeId !== doc.id) {
+      invalidateEmbedAttempt(activeId)
+      revokeEmbed(activeId)
+      // The revoked URL must never be reused when the user returns to a tab.
+      setEmbeds(current => {
+        const next = { ...current }
+        delete next[activeId]
+        return next
+      })
+    }
+    activeIdRef.current = doc.id
     setActiveId(doc.id)
     setMobileView('reader')
     if (embeds[doc.id]?.status === 'live' || embeds[doc.id]?.status === 'loading') return
+    const attempt = (embedAttempts.current.get(doc.id) ?? 0) + 1
+    embedAttempts.current.set(doc.id, attempt)
     setEmbeds(current => ({ ...current, [doc.id]: { status: 'loading' } }))
     void embedSession(doc.id, 'system', connection?.capabilities?.embedOrigin || undefined)
-      .then(data => setEmbeds(current => ({ ...current, [doc.id]: { status: 'live', url: data.embed_url, sessionId: data.session_id } })))
+      .then(data => {
+        if (disposedRef.current || activeIdRef.current !== doc.id
+            || embedAttempts.current.get(doc.id) !== attempt) {
+          void revokeEmbedSession(data.session_id).catch(() => undefined)
+          return
+        }
+        setEmbeds(current => ({ ...current, [doc.id]: { status: 'live', url: data.embed_url, sessionId: data.session_id } }))
+      })
       .catch(async error => {
+        const stale = () => disposedRef.current || activeIdRef.current !== doc.id
+          || embedAttempts.current.get(doc.id) !== attempt
+        if (stale()) return
         if (error instanceof RevisoHttpError && (error.status === 404 || error.status === 501)) {
           try {
             const content = await documentContent(doc.id)
+            if (stale()) return
             setEmbeds(current => ({ ...current, [doc.id]: { status: 'fallback', content } }))
             return
           } catch {}
         }
+        if (stale()) return
         setEmbeds(current => ({ ...current, [doc.id]: { status: 'error', message: error instanceof Error ? error.message : String(error) } }))
       })
   }
@@ -330,7 +368,12 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
             </div>
             <div className='rs-global-reader-body'>
               {embeds[active.id]?.status === 'live' && embeds[active.id].url !== undefined
-                ? <iframe ref={node => { if (node === null) iframeRefs.current.delete(active.id); else iframeRefs.current.set(active.id, node) }} className='rs-embed-frame' title={active.title} src={embeds[active.id].url} sandbox='allow-scripts' allow='fullscreen' referrerPolicy='no-referrer' loading='eager' />
+                ? <EmbedFrame
+                    frameRef={node => { if (node === null) iframeRefs.current.delete(active.id); else iframeRefs.current.set(active.id, node) }}
+                    className='rs-embed-frame'
+                    title={active.title}
+                    url={embeds[active.id].url}
+                  />
                 : embeds[active.id]?.status === 'fallback'
                   ? <div className='rs-reader'>{embeds[active.id].content?.content_html ? <iframe className='rs-html-frame' title={active.title} sandbox='' srcDoc={embeds[active.id].content?.content_html} /> : embeds[active.id].content?.content}</div>
                   : embeds[active.id]?.status === 'error'

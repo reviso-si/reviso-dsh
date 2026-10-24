@@ -32,6 +32,43 @@ test('global browser ships cache, source-session, view-mode, and security contra
   assert.equal(bundle.includes('allow-popups-to-escape-sandbox'), false)
 })
 
+test('embed frame keeps fragment codes out of host DOM while retaining opaque sandbox', () => {
+  const source = readFileSync(new URL('../src/client/EmbedFrame.tsx', import.meta.url), 'utf8')
+  assert.match(source, /useEffect\(/)
+  assert.match(source, /URL\.createObjectURL/)
+  assert.match(source, /return \(\) => URL\.revokeObjectURL\(objectUrl\)/)
+  assert.doesNotMatch(source, /useMemo/)
+  assert.match(source, /http-equiv="refresh"/)
+  assert.match(source, /sandbox='allow-scripts'/)
+  assert.equal(source.includes('allow-same-origin'), false)
+  assert.equal(source.includes('allow-popups'), false)
+})
+
+test('document switch clears revoked embed state before returning to a tab', () => {
+  const source = readFileSync(new URL('../src/client/GlobalPanel.tsx', import.meta.url), 'utf8')
+  const openDoc = source.slice(source.indexOf('function openDoc'), source.indexOf('const docMeta'))
+  assert.match(openDoc, /revokeEmbed\(activeId\)/)
+  assert.match(openDoc, /delete next\[activeId\]/)
+  assert.ok(openDoc.indexOf('revokeEmbed(activeId)') < openDoc.indexOf('if (embeds[doc.id]'))
+})
+
+test('late embed-session responses are revoked by both client surfaces', () => {
+  const globalPanel = readFileSync(new URL('../src/client/GlobalPanel.tsx', import.meta.url), 'utf8')
+  const sessionView = readFileSync(new URL('../src/client/SessionView.tsx', import.meta.url), 'utf8')
+  for (const source of [globalPanel, sessionView]) {
+    assert.match(source, /embedSessions\.current/)
+    assert.match(source, /revokeEmbedSession\((?:data|embed)\.session_id\)/)
+    assert.match(source, /catch\(\(\) => undefined\)/)
+    assert.match(source, /const stale = \(\) =>/)
+    assert.ok((source.match(/if \(stale\(\)\) return/g) || []).length >= 3)
+  }
+  assert.match(globalPanel, /activeIdRef\.current !== doc\.id/)
+  assert.match(globalPanel, /embedAttempts\.current\.get\(doc\.id\) !== attempt/)
+  assert.match(sessionView, /sessionEpoch\.current !== epoch/)
+  assert.match(sessionView, /!openDocIds\.current\.has\(doc\.id\)/)
+  assert.match(sessionView, /mountedRef\.current/)
+})
+
 test('embed revoke failures stay visible in both client surfaces', () => {
   const sessionView = readFileSync(new URL('../src/client/SessionView.tsx', import.meta.url), 'utf8')
   const globalPanel = readFileSync(new URL('../src/client/GlobalPanel.tsx', import.meta.url), 'utf8')
