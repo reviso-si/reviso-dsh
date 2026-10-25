@@ -31,6 +31,7 @@ export function createOAuthBridge(ctx, options = {}) {
   if (ctx.webServer?.register === undefined) return () => {}
 
   const defaultServer = normalizeServer(options.server || DEFAULT_SERVER)
+  const configuredEmbedOrigin = normalizeServer(options.embedOrigin || '')
   if (defaultServer === '') throw new Error('Reviso bridge server must be an HTTPS origin')
   const pending = new Map()
   const clients = new Map()
@@ -40,7 +41,7 @@ export function createOAuthBridge(ctx, options = {}) {
     ctx.webServer.register({
       kind: 'exact',
       path: '/plugins/reviso/auth/status',
-      handler: (req, res) => handleStatus(ctx, req, res, admission),
+      handler: (req, res) => handleStatus(ctx, req, res, admission, configuredEmbedOrigin),
     }),
     ctx.webServer.register({
       kind: 'exact',
@@ -70,7 +71,7 @@ export function createOAuthBridge(ctx, options = {}) {
     ctx.webServer.register({
       kind: 'exact',
       path: '/plugins/reviso/embed-session',
-      handler: (req, res) => handleEmbedSession(ctx, req, res, admission, activeEmbeds),
+      handler: (req, res) => handleEmbedSession(ctx, req, res, admission, activeEmbeds, configuredEmbedOrigin),
     }),
     ctx.webServer.register({
       kind: 'exact',
@@ -103,12 +104,12 @@ export function createOAuthBridge(ctx, options = {}) {
   }
 }
 
-async function handleStatus(ctx, req, res, admission) {
+async function handleStatus(ctx, req, res, admission, configuredEmbedOrigin = '') {
   if (!requireAdmission(req, res, admission)) return
   const token = await describe(ctx, TOKEN_REF)
   const server = await resolveRef(ctx, SERVER_REF)
   const workspaceId = await resolveRef(ctx, WORKSPACE_REF)
-  const advertisedEmbedOrigin = resolveEmbedOrigin(server)
+  const advertisedEmbedOrigin = resolveEmbedOrigin(server, configuredEmbedOrigin)
   sendJson(res, 200, {
     connected: token.configured && server !== '' && workspaceId !== '',
     server,
@@ -153,7 +154,7 @@ async function handleDocument(ctx, req, res, admission) {
   }
 }
 
-async function handleEmbedSession(ctx, req, res, admission, activeEmbeds) {
+async function handleEmbedSession(ctx, req, res, admission, activeEmbeds, configuredEmbedOrigin = '') {
   if (!requireAdmission(req, res, admission, { mutation: true })) return
   if ((req.method || 'POST') !== 'POST') {
     sendJson(res, 405, { error: 'method_not_allowed' })
@@ -173,7 +174,7 @@ async function handleEmbedSession(ctx, req, res, admission, activeEmbeds) {
   }
   try {
     const credential = await readCredential(ctx)
-    const embedOrigin = resolveEmbedOrigin(credential.server)
+    const embedOrigin = resolveEmbedOrigin(credential.server, configuredEmbedOrigin)
     const hostOrigin = requestOrigin(ctx, req)
     const result = await authenticatedPost(
       ctx,
@@ -544,9 +545,9 @@ function callbackOrigin(ctx, req) {
   return `http://${host}`
 }
 
-function resolveEmbedOrigin(server) {
+function resolveEmbedOrigin(server, configuredEmbedOrigin = '') {
   const normalizedServer = normalizeServer(server)
-  const configured = normalizeServer(process.env.REVISO_DSH_EMBED_ORIGIN || '')
+  const configured = normalizeServer(configuredEmbedOrigin || process.env.REVISO_DSH_EMBED_ORIGIN || '')
   if (configured !== '') {
     // An explicit deployment allowlist wins and still must be HTTPS.
     if (new URL(configured).protocol !== 'https:') {

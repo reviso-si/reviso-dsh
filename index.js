@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import z from '@deepseek-ai/schemastery'
 import { createOAuthBridge } from './host/oauth.js'
 import { readCredential } from './host/credentials.js'
 import { errorFromResponse, messageOf } from './host/errors.js'
@@ -16,6 +17,9 @@ import { markPublished } from './host/generation.js'
  */
 export const name = 'reviso-dsh'
 export const inject = ['tools', 'credentials']
+export const Config = z.object({
+  embedOrigin: z.string().default(''),
+})
 
 const REQUEST_TIMEOUT_MS = 30_000
 
@@ -79,7 +83,7 @@ const publishOutput = {
  * a registration problem must not take down the host boot.
  * @param ctx - Host plugin context.
  */
-export function apply(ctx) {
+export function apply(ctx, config = {}) {
   try {
     ctx.tools.register(revisoPublishTool(ctx))
   } catch (err) {
@@ -88,7 +92,7 @@ export function apply(ctx) {
 
   if (typeof ctx.inject === 'function') {
     ctx.inject(['webServer'], webCtx => {
-      const register = () => createOAuthBridge(webCtx)
+      const register = () => createOAuthBridge(webCtx, { embedOrigin: config.embedOrigin })
       if (typeof webCtx.effect === 'function') {
         webCtx.effect(register, 'reviso-dsh oauth bridge')
       } else {

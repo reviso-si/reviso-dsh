@@ -52,7 +52,7 @@ function setupBridge(options = {}) {
       },
     },
   }
-  dispose = createOAuthBridge(ctx, { server: 'https://reviso.work' })
+  dispose = createOAuthBridge(ctx, { server: 'https://reviso.work', embedOrigin: options.embedOrigin || '' })
   return { routes, values, dispose: () => dispose() }
 }
 
@@ -268,8 +268,8 @@ test('default embed origin is the authenticated server origin, never /api/config
 
 test('explicit embed origin allowlist rejects a different HTTPS origin', async () => {
   const previous = process.env.REVISO_DSH_EMBED_ORIGIN
-  process.env.REVISO_DSH_EMBED_ORIGIN = 'https://reviso-api.fly.dev'
-  const { routes, values } = setupBridge()
+  delete process.env.REVISO_DSH_EMBED_ORIGIN
+  const { routes, values } = setupBridge({ embedOrigin: 'https://reviso-api.fly.dev' })
   values.set('REVISO_DSH_TOKEN', 'rak_embed')
   values.set('REVISO_DSH_SERVER', 'https://reviso.work')
   values.set('REVISO_DSH_WORKSPACE_ID', 'wsp_personal')
