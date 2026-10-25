@@ -44,6 +44,18 @@ test('embed frame keeps fragment codes out of host DOM while retaining opaque sa
   assert.equal(source.includes('allow-popups'), false)
 })
 
+test('embed frame accepts host-mediated external open only for its source and canonical document', () => {
+  const source = readFileSync(new URL('../src/client/EmbedFrame.tsx', import.meta.url), 'utf8')
+  const helper = readFileSync(new URL('../src/client/embedOpenTarget.ts', import.meta.url), 'utf8')
+  assert.match(source, /event\.source !== iframe\.current\.contentWindow/)
+  assert.match(source, /event\.origin !== expectedOrigin/)
+  assert.match(helper, /reviso:open-external/)
+  assert.match(helper, /value\.href !== expectedPath/)
+  assert.match(helper, /target\.pathname !== expectedPath/)
+  assert.match(source, /window\.open\(target, '_blank', 'noopener,noreferrer'\)/)
+  assert.equal(source.includes('allow-popups'), false)
+})
+
 test('document switch clears revoked embed state before returning to a tab', () => {
   const source = readFileSync(new URL('../src/client/GlobalPanel.tsx', import.meta.url), 'utf8')
   const openDoc = source.slice(source.indexOf('function openDoc'), source.indexOf('const docMeta'))

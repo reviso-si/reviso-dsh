@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { embedOpenTarget } from './embedOpenTarget'
 
 type EmbedFrameProps = {
   title: string
   url: string
+  openUrl: string
   className: string
   frameRef?: (node: HTMLIFrameElement | null) => void
 }
@@ -26,10 +28,12 @@ export function embedBootstrapHtml(embedUrl: string): string {
 export function EmbedFrame({
   title,
   url,
+  openUrl,
   className,
   frameRef,
 }: EmbedFrameProps): ReactNode {
   const [src, setSrc] = useState('about:blank')
+  const iframe = useRef<HTMLIFrameElement | null>(null)
 
   useEffect(() => {
     // Create and revoke in the same effect lifetime so discarded renders and
@@ -41,9 +45,24 @@ export function EmbedFrame({
     return () => URL.revokeObjectURL(objectUrl)
   }, [url])
 
+  useEffect(() => {
+    const expectedOrigin = new URL(url).origin
+    const listener = (event: MessageEvent) => {
+      if (iframe.current === null || event.source !== iframe.current.contentWindow) return
+      if (event.origin !== expectedOrigin) return
+      const target = embedOpenTarget(url, openUrl, event.data)
+      if (target !== '') window.open(target, '_blank', 'noopener,noreferrer')
+    }
+    window.addEventListener('message', listener)
+    return () => window.removeEventListener('message', listener)
+  }, [openUrl, url])
+
   return (
     <iframe
-      ref={frameRef}
+      ref={node => {
+        iframe.current = node
+        frameRef?.(node)
+      }}
       className={className}
       title={title}
       src={src}

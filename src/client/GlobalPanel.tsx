@@ -373,6 +373,7 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
                     className='rs-embed-frame'
                     title={active.title}
                     url={embeds[active.id].url}
+                    openUrl={active.url}
                   />
                 : embeds[active.id]?.status === 'fallback'
                   ? <div className='rs-reader'>{embeds[active.id].content?.content_html ? <iframe className='rs-html-frame' title={active.title} sandbox='' srcDoc={embeds[active.id].content?.content_html} /> : embeds[active.id].content?.content}</div>

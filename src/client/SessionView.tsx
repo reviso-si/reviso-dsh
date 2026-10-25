@@ -335,6 +335,7 @@ export function RevisoSessionView(props: SessionViewProps) {
                       className='rs-embed-frame'
                       title={doc.title}
                       url={embed.url}
+                      openUrl={doc.url}
                     />
                   )
                 : embed?.status === 'fallback'
