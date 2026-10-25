@@ -124,7 +124,7 @@ function installFetch(control = {}) {
       return json(201, {
         session_id: 'ems_ffffffffffff',
         document_id: 'doc_ffffffffffff',
-        embed_url: 'https://reviso-api.fly.dev/embed/v1/documents/doc_ffffffffffff?session=ems_ffffffffffff#code=rem_code_secret',
+        embed_url: control.embedUrl || 'https://reviso-api.fly.dev/embed/v1/documents/doc_ffffffffffff?session=ems_ffffffffffff#code=rem_code_secret',
         code_expires_at: '2026-01-01T00:01:00+00:00',
         code_expires_in: 60,
         token_expires_in: 900,
@@ -134,7 +134,7 @@ function installFetch(control = {}) {
       return json(201, {
         session_id: 'ems_abcdef123456',
         document_id: 'doc_abcdef123456',
-        embed_url: 'https://reviso-api.fly.dev/embed/v1/documents/doc_abcdef123456?session=ems_abcdef123456#code=rem_code_secret',
+        embed_url: control.embedUrl || 'https://reviso-api.fly.dev/embed/v1/documents/doc_abcdef123456?session=ems_abcdef123456#code=rem_code_secret',
         code_expires_at: '2026-01-01T00:01:00+00:00',
         code_expires_in: 60,
         token_expires_in: 900,
@@ -234,6 +234,55 @@ test('host origin remains DSH while iframe origin is independently validated', a
     assert.equal(res.status, 200, res.body)
     const call = fakeFetch.calls.find(row => row.url.endsWith('/api/embed/v1/documents/doc_abcdef123456/sessions'))
     assert.equal(JSON.parse(call.options.body).origin, 'http://127.0.0.1:3080')
+  } finally {
+    fakeFetch.restore()
+    if (previous === undefined) delete process.env.REVISO_DSH_EMBED_ORIGIN
+    else process.env.REVISO_DSH_EMBED_ORIGIN = previous
+  }
+})
+
+test('default embed origin is the authenticated server origin, never /api/config', async () => {
+  const previous = process.env.REVISO_DSH_EMBED_ORIGIN
+  delete process.env.REVISO_DSH_EMBED_ORIGIN
+  const { routes, values } = setupBridge()
+  values.set('REVISO_DSH_TOKEN', 'rak_embed')
+  values.set('REVISO_DSH_SERVER', 'https://reviso.work')
+  values.set('REVISO_DSH_WORKSPACE_ID', 'wsp_personal')
+  const fakeFetch = installFetch({ embedUrl: 'https://evil.example/embed/v1/documents/doc_abcdef123456?session=ems_abcdef123456#code=rem_code_secret' })
+  try {
+    const res = response()
+    await routes.get('/plugins/reviso/embed-session')({
+      url: '/plugins/reviso/embed-session', method: 'POST',
+      headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-reviso-dsh-request': '1' },
+      body: { document_id: 'doc_abcdef123456' }, socket: { remoteAddress: '127.0.0.1' },
+    }, res)
+    assert.equal(res.status, 502, res.body)
+    assert.match(res.body, /embed session origin mismatch/)
+    assert.equal(fakeFetch.calls.some(call => call.url.endsWith('/api/config')), false)
+  } finally {
+    fakeFetch.restore()
+    if (previous === undefined) delete process.env.REVISO_DSH_EMBED_ORIGIN
+    else process.env.REVISO_DSH_EMBED_ORIGIN = previous
+  }
+})
+
+test('explicit embed origin allowlist rejects a different HTTPS origin', async () => {
+  const previous = process.env.REVISO_DSH_EMBED_ORIGIN
+  process.env.REVISO_DSH_EMBED_ORIGIN = 'https://reviso-api.fly.dev'
+  const { routes, values } = setupBridge()
+  values.set('REVISO_DSH_TOKEN', 'rak_embed')
+  values.set('REVISO_DSH_SERVER', 'https://reviso.work')
+  values.set('REVISO_DSH_WORKSPACE_ID', 'wsp_personal')
+  const fakeFetch = installFetch({ embedUrl: 'https://wrong.example/embed/v1/documents/doc_abcdef123456?session=ems_abcdef123456#code=rem_code_secret' })
+  try {
+    const res = response()
+    await routes.get('/plugins/reviso/embed-session')({
+      url: '/plugins/reviso/embed-session', method: 'POST',
+      headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'x-reviso-dsh-request': '1' },
+      body: { document_id: 'doc_abcdef123456' }, socket: { remoteAddress: '127.0.0.1' },
+    }, res)
+    assert.equal(res.status, 502, res.body)
+    assert.match(res.body, /embed session origin mismatch/)
   } finally {
     fakeFetch.restore()
     if (previous === undefined) delete process.env.REVISO_DSH_EMBED_ORIGIN

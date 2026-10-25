@@ -108,9 +108,7 @@ async function handleStatus(ctx, req, res, admission) {
   const token = await describe(ctx, TOKEN_REF)
   const server = await resolveRef(ctx, SERVER_REF)
   const workspaceId = await resolveRef(ctx, WORKSPACE_REF)
-  const advertisedEmbedOrigin = token.configured
-    ? await discoverEmbedOrigin(ctx, server).catch(() => resolveEmbedOrigin(server))
-    : resolveEmbedOrigin(server)
+  const advertisedEmbedOrigin = resolveEmbedOrigin(server)
   sendJson(res, 200, {
     connected: token.configured && server !== '' && workspaceId !== '',
     server,
@@ -175,8 +173,7 @@ async function handleEmbedSession(ctx, req, res, admission, activeEmbeds) {
   }
   try {
     const credential = await readCredential(ctx)
-    const embedOrigin = await discoverEmbedOrigin(ctx, credential.server)
-      .catch(() => resolveEmbedOrigin(credential.server))
+    const embedOrigin = resolveEmbedOrigin(credential.server)
     const hostOrigin = requestOrigin(ctx, req)
     const result = await authenticatedPost(
       ctx,
@@ -547,17 +544,18 @@ function callbackOrigin(ctx, req) {
   return `http://${host}`
 }
 
-async function discoverEmbedOrigin(ctx, server) {
-  const body = await authenticatedGet(ctx, '/api/config')
-  const configured = normalizeServer(String(body.embed_origin || ''))
-  if (configured !== '' && new URL(configured).protocol === 'https:') return configured
-  return resolveEmbedOrigin(server)
-}
-
 function resolveEmbedOrigin(server) {
-  const configured = normalizeServer(process.env.REVISO_DSH_EMBED_ORIGIN || '')
-  if (configured !== '' && new URL(configured).protocol === 'https:') return configured
   const normalizedServer = normalizeServer(server)
+  const configured = normalizeServer(process.env.REVISO_DSH_EMBED_ORIGIN || '')
+  if (configured !== '') {
+    // An explicit deployment allowlist wins and still must be HTTPS.
+    if (new URL(configured).protocol !== 'https:') {
+      throw new Error('REVISO_DSH_EMBED_ORIGIN must be an HTTPS origin')
+    }
+    return configured
+  }
+  // Safe default: only the authenticated API origin itself is trusted. Never
+  // accept an arbitrary third origin discovered from API-controlled JSON.
   return normalizedServer === '' ? '' : new URL(normalizedServer).origin
 }
 
