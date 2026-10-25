@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto'
-import z from '@deepseek-ai/schemastery'
 import { createOAuthBridge } from './host/oauth.js'
 import { readCredential } from './host/credentials.js'
 import { errorFromResponse, messageOf } from './host/errors.js'
@@ -17,9 +16,6 @@ import { markPublished } from './host/generation.js'
  */
 export const name = 'reviso-dsh'
 export const inject = ['tools', 'credentials']
-export const Config = z.object({
-  embedOrigin: z.string().default(''),
-})
 
 const REQUEST_TIMEOUT_MS = 30_000
 
