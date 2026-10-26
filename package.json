@@ -14,6 +14,8 @@
     "host",
     "lib/client.js",
     "cordis.patch.yml",
+    "docs/client-face-contract.md",
+    "SECURITY.md",
     "README.md",
     "LICENSE"
   ],
@@ -25,6 +27,7 @@
   "scripts": {
     "build:client": "tsdown && node scripts/wrap-client.mjs",
     "check:packed": "node scripts/check-packed-tarball.mjs",
+    "check:install": "node scripts/check-packed-install.mjs",
     "prepack": "npm run build:client && npm run check:packed",
     "test": "node --test test/*.test.mjs",
     "verify:real": "node scripts/real-publish.mjs",
@@ -38,7 +41,7 @@
     "uxe:audit": "python3 .uxe/scripts/audit.py --project-root .",
     "clean:client": "rm -rf lib && mkdir -p lib",
     "prepare": "node scripts/prepare-from-git.mjs",
-    "check": "npm run build:client && npm test && npm run check:packed"
+    "check": "npm run build:client && npm test && npm run check:packed && npm run check:install"
   },
   "dsh": {
     "bundle": {

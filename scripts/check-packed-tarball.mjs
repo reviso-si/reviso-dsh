@@ -15,7 +15,11 @@ try {
   const output = execFileSync('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', temp], {
     cwd: root,
     encoding: 'utf8',
-    env: { ...process.env, npm_config_loglevel: 'error' },
+    env: {
+      ...process.env,
+      npm_config_dry_run: 'false',
+      npm_config_loglevel: 'error',
+    },
   })
   const packed = JSON.parse(output)
   const filename = packed?.[0]?.filename

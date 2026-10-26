@@ -1,8 +1,13 @@
 # Security
 
-Please report vulnerabilities privately to the maintainers of
-`reviso-si/reviso-dsh`. Do not open a public issue containing access tokens,
-refresh tokens, embed codes, cookies, private document content, or customer data.
+Please report vulnerabilities privately through GitHub Security Advisories:
+
+https://github.com/reviso-si/reviso-dsh/security/advisories/new
+
+Do not open a public issue containing access tokens, refresh tokens, embed
+codes, cookies, private document content, or customer data. If GitHub Security
+Advisories are unavailable, contact the repository maintainers through the
+private contact method listed on the `reviso-si` organization profile.
 
 ## Trust boundaries
 
