@@ -48,7 +48,7 @@ test('embed frame accepts host-mediated external open only for its source and ca
   const source = readFileSync(new URL('../src/client/EmbedFrame.tsx', import.meta.url), 'utf8')
   const helper = readFileSync(new URL('../src/client/embedOpenTarget.ts', import.meta.url), 'utf8')
   assert.match(source, /event\.source !== iframe\.current\.contentWindow/)
-  assert.match(source, /event\.origin !== expectedOrigin/)
+  assert.match(source, /allowedEmbedMessageOrigin\(event\.origin, url\)/)
   assert.match(helper, /reviso:open-external/)
   assert.match(helper, /value\.href !== expectedPath/)
   assert.match(helper, /target\.pathname !== expectedPath/)

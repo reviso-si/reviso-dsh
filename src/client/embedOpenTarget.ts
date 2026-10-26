@@ -30,3 +30,12 @@ export function embedOpenTarget(
       || target.search !== '' || target.hash !== '' || embedOrigin === '') return ''
   return target.toString()
 }
+
+export function allowedEmbedMessageOrigin(actual: string, embedUrl: string): boolean {
+  if (actual === 'null') return true
+  try {
+    return actual === new URL(embedUrl).origin
+  } catch {
+    return false
+  }
+}

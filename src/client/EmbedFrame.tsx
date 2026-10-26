@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { embedOpenTarget } from './embedOpenTarget'
+import { allowedEmbedMessageOrigin, embedOpenTarget } from './embedOpenTarget'
 
 type EmbedFrameProps = {
   title: string
@@ -46,10 +46,9 @@ export function EmbedFrame({
   }, [url])
 
   useEffect(() => {
-    const expectedOrigin = new URL(url).origin
     const listener = (event: MessageEvent) => {
       if (iframe.current === null || event.source !== iframe.current.contentWindow) return
-      if (event.origin !== expectedOrigin) return
+      if (!allowedEmbedMessageOrigin(event.origin, url)) return
       const target = embedOpenTarget(url, openUrl, event.data)
       if (target !== '') window.open(target, '_blank', 'noopener,noreferrer')
     }

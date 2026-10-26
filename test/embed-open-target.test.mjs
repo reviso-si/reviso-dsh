@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { embedOpenTarget } from '../src/client/embedOpenTarget.ts'
+import { allowedEmbedMessageOrigin, embedOpenTarget } from '../src/client/embedOpenTarget.ts'
 
 const embedUrl = 'https://reviso-api.fly.dev/embed/v1/documents/doc_012345abcdef?session=ems_012345abcdef#code=rem_code_secret'
 const openUrl = 'https://reviso.work/documents/012345abcdef'
@@ -17,4 +17,11 @@ test('rejects wrong document, path, version, query, and insecure URL', () => {
   assert.equal(embedOpenTarget(embedUrl, openUrl, { ...message, version: 2 }), '')
   assert.equal(embedOpenTarget(embedUrl, `${openUrl}?x=1`, message), '')
   assert.equal(embedOpenTarget(embedUrl, 'http://reviso.work/documents/012345abcdef', message), '')
+})
+
+test('allows the opaque sandbox origin and exact embed origin only', () => {
+  assert.equal(allowedEmbedMessageOrigin('null', embedUrl), true)
+  assert.equal(allowedEmbedMessageOrigin('https://reviso-api.fly.dev', embedUrl), true)
+  assert.equal(allowedEmbedMessageOrigin('https://wrong.example', embedUrl), false)
+  assert.equal(allowedEmbedMessageOrigin('', embedUrl), false)
 })
