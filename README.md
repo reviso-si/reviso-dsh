@@ -1,129 +1,107 @@
-# reviso-dsh
+# Reviso for DeepSeek Harness
 
-Reviso for DeepSeek Harness (DSH) — the DSH surface of the Reviso family.
+Reviso lets a coding agent publish its work for human review, then find the same
+document again from the session that created it. This repository is the
+DeepSeek Harness (DSH) integration.
 
-| repo | surface |
-|---|---|
-| `reviso` | product (backend + web) |
-| `reviso-agent` | agent skill (any agent, platform-agnostic) |
-| `reviso-cli` | CLI |
-| **`reviso-dsh`** | DSH host integration (this repo) |
+## What it provides
 
-## Status: Host-backed Reviso view
+- `reviso_publish` host tool: create or update a Reviso document from an agent
+  session without exposing the Reviso access token to the browser.
+- A Reviso sidebar entry and global document browser.
+- A session-scoped Reviso panel with an embedded, read-only document view.
+- A same-origin OAuth bridge. Tokens remain in DSH credentials; the browser
+  receives only a short-lived embed URL.
+- Host-mediated **Open in Reviso** and opaque-origin iframe handling.
 
-The supported path is Host-owned end to end:
-- `reviso_publish` publishes from the agent without exposing the token.
-- The sidebar panel and session tab read through `/plugins/reviso/*`.
-- When unconfigured, both show `连接 Reviso`; the same-origin OAuth bridge
-  stores `REVISO_DSH_*` refs in DSH credentials and resolves the personal
-  workspace. The browser never sees a Reviso token and there is no default
-  mock data.
+The Reviso server, CLI, and cross-agent MCP integration live in their own
+repositories. This package is only the DSH host adapter.
 
-Slot/build contract: see docs/client-face-contract.md.
+## Requirements
 
-## Host-owned publish tool (spike)
-
-`index.js` registers `reviso_publish` on the DSH Host. The agent passes title
-and content; the tool resolves three DSH credential refs, reads the calling
-session id from `exec.agent.session.header.id`, and posts to Reviso with
-`source_kind=dsh` plus `source_session_id`. The token never enters the browser
-or an agent child process.
-
-Installed DSH credentials are a flat mapping of POSIX refs to strings
-(`$DSH_HOME/.credentials.yaml`):
-
-```yaml
-REVISO_DSH_TOKEN: rak_...
-REVISO_DSH_WORKSPACE_ID: wsp_...
-REVISO_DSH_SERVER: https://reviso.work
-```
-
-The product path is the `连接 Reviso` button in the DSH panel or session tab.
-For headless verification only, the tool can also reuse a prior CLI OAuth
-login from `~/.config/reviso/credentials.json`:
-
-```sh
-reviso auth login --server https://reviso.work
-```
-
-The tool then resolves the workspace from `/api/agent-connection/self` and
-reuses that connection.
-
-Contract test: `npm test`.
-
-Real publish verification (requires the three refs above and network access):
-
-```sh
-npm run verify:real
-# optional: -- --credentials <path> --session-id <id> --title <title>
-```
-
-It runs the same ToolRuntime and credentials provider as the Host, publishes
-one document, and reads it back through
-`GET /api/documents?session_key=dsh:<sessionId>`.
-
-
-
-Minimal DSH bundle that loads under the harness. Roadmap:
-
-1. **Phase 0 (here)** — bundle skeleton, load-verified locally.
-2. **Phase 1** — Reviso HTTP client: publish/read with `source_kind` +
-   `source_session_id` (normalized to `session_key`); requires the L0 contract
-   in the `reviso` main repo (`document_sources` sidecar + read APIs).
-3. **Phase 2** — Agent Inbox tab + per-session "back to session" openers
-   (client-face spike against DSH's browser extension contract).
-
-## Concepts (per DSH docs/user/develop/basic/publish.md)
-
-- A **bundle** is an npm package shipping a config layer: `package.json`
-  declares `dsh.bundle` → its `cordis.patch.yml` inserts plugin rows that
-  reference the package **by name**.
-- A **profile** is what a user boots (`dsh --profile <name>`); `dsh plugin`
-  maintains it. Layer order: profile bundles → profile patch → home patch →
-  `--patch` overlays.
+- DeepSeek Harness with plugin/profile support.
+- A Reviso account or a compatible self-hosted Reviso server.
+- Node.js 22 or newer for development.
 
 ## Install
 
+Install from GitHub or a local checkout through the DSH plugin manager:
+
 ```sh
-dsh plugin --profile <name> add /path/to/reviso-dsh
-dsh --profile <name> --dump-config   # expect a "# == dsh-reviso" layer
+dsh plugin --profile web add github:reviso-si/reviso-dsh
+# or, while developing locally:
+dsh plugin --profile web add /absolute/path/to/reviso-dsh
 ```
 
-## Local dev
+Confirm that the profile composed the plugin:
 
-Scratch form uses an absolute source path (paths must be absolute):
+```sh
+dsh --profile web --dump-config | grep -A5 dsh-reviso
+```
+
+Then start DSH:
+
+```sh
+dsh web
+```
+
+Open **Reviso** from the sidebar and connect the account through the OAuth
+button. The production embed origin can be pinned in the DSH profile:
 
 ```yaml
-# dev.patch.yml
-- insert:
-    - id: reviso-dsh
-      name: '/absolute/path/to/reviso-dsh/index.js'
+- id: reviso-dsh
+  name: dsh-reviso
+  config:
+    embedOrigin: https://reviso-api.fly.dev
 ```
+
+When `embedOrigin` is omitted, the adapter accepts only the authenticated
+Reviso server origin. It does not trust an arbitrary origin discovered from API
+JSON.
+
+## Development
 
 ```sh
-pnpm dsh web --patch ./dev.patch.yml
+pnpm install --frozen-lockfile
+pnpm run build:client
+npm test
+pnpm run check:packed
 ```
 
-## Contract
+The published npm tarball contains `index.js`, `host/`, the rebuilt
+`lib/client.js`, and `cordis.patch.yml`. Generated client code is validated by
+the packed-tarball check.
 
-The cross-repo contract (Reviso HTTP API + `source_kind` enum
-`dsh|claude|codex|cursor|mcp` + `session_key = kind:normalized_id`) is owned by
-the `reviso` main repo (L0). This package never talks to Supabase directly.
+## Security model
 
-Tested with DSH `0.2.1-rc.2` (client manifest aligned with the shell static module
-contract). The client bundle declares `@deepseek-ai/dsh-client-store` as an
-external and does not inject the retired `dsh-client-runtime` seed.
+- The Reviso access and refresh tokens stay in DSH credentials.
+- The browser never receives a `rak_` token.
+- The embed iframe uses `sandbox="allow-scripts"` and intentionally runs as an
+  opaque origin.
+- Iframe messages are accepted only from the current iframe. Because the frame
+  is intentionally sandboxed without `allow-same-origin`, its browser message
+  origin is `null`; document identity and URL are still checked against the
+  canonical host URL.
+- External navigation is performed by the DSH parent after validation. The
+  sandbox does not grant popup or same-origin privileges.
+- Embed sessions are short-lived, document-scoped, one-time-code sessions and
+  are revoked when their host surface is closed or replaced.
 
-## See it locally
+See [SECURITY.md](SECURITY.md) and [docs/client-face-contract.md](docs/client-face-contract.md).
 
-`sh
-pnpm install && pnpm run build:client   # produce lib/client.js
-dsh plugin --profile web add /Users/touchskyer/Code/reviso-projects/reviso-dsh-embed-v1
-dsh web                                  # Reviso entry sits beside Settings in the sidebar
-`
+## Real verification
 
-Rollback: `dsh plugin --profile web remove dsh-reviso`.
+A live publish check requires a connected Reviso credential and network access:
+
+```sh
+npm run verify:real
+# optional:
+npm run verify:real -- --credentials <path> --session-id <id> --title <title>
+```
+
+It uses the same tool runtime and credential provider as DSH, publishes one
+document, and reads it back through the Reviso session query.
 
 ## License
 
-MIT — same as `reviso-agent` / `reviso-cli`.
+MIT. See [LICENSE](LICENSE).

@@ -1,7 +1,8 @@
-# client-face contract — 第三方插件如何向 DSH Web 注册 UI（spike 结论，2026-10）
+# DSH client-face contract
 
-> 结论：**A1 —— 存在公开、有文档、有参考实现的 UI 扩展点**。本插件走 B1（真面板），无需降级。
-> 调研对象：dsh 0.1.0-rc.8（源码 `/Users/touchskyer/Code/references/deepseek-harness`，HEAD 当时工作区）。
+This document records the DSH slot and browser-module contract used by this
+plugin. It is intentionally implementation-facing and should be reviewed when
+upgrading the DSH host.
 
 ## 1. 组合模型：slot 系统（一个 API）
 
@@ -46,7 +47,7 @@
 
 ## 5. 构建产物形状（已从已安装包验证）
 
-`/Users/touchskyer/node_modules/@deepseek-ai/dsh-client-ui-brand-official/lib/client.js`（49 行）：
+The installed DSH client bundle uses this package shape:
 
 ```js
 window.__ModuleLoader__.load({
@@ -64,7 +65,7 @@ window.__ModuleLoader__.load({
 });
 ```
 
-官方共享 preset：`packages/client/tsdown.client.ts` 的 `clientBundle(id, libEntry, options)`（closure-factory 工件 + lightningcss CSS 管道）。**我们仓不 import 该 preset**（其依赖从 harness 树解析，会拖入 harness node_modules）；改为在仓内手写最小 tsdown 配置复刻同一产物形状（cjs + banner/footer + 全 bare-external），并把「把 preset 发布为独立包」记为 upstream 候选。
+官方共享 preset：`packages/client/tsdown.client.ts` 的 `clientBundle(id, libEntry, options)`（closure-factory 工件 + lightningcss CSS 管道）。**我们仓不 import 该 preset**The repository uses a small local tsdown configuration that mirrors the same artifact shape (CJS factory, banner/footer, and bare externals) without depending on a harness checkout.
 
 ## 6. 本插件的决定（B1）
 
@@ -72,10 +73,10 @@ window.__ModuleLoader__.load({
 - `shell.overlay` 注册面板（`id: 'reviso-dsh.panel'`，自管 pointer-events）；
 - 两者共享一个声明 store（开/关面板）——同一 apply 内一个 handle 传两个 register；
 - `apply()` fail-soft：slot 注册失败只记 console.warn，不抛；
-- 数据：`REVISO_SERVER` + 凭证从配置/env 读；无凭证或 fetch 失败 → 演示模式（明确标注）。真实 API 的 CORS 由部署端 `REVISO_CORS_ALLOWLIST` 放行 DSH origin（有环境的 caveat，写进 README）。
+- Data comes from the authenticated Reviso host bridge. Missing credentials or failed requests are shown as connection/error states; the plugin does not invent mock documents. The deployment must allow the DSH origin through its Reviso embed allowlist.
 
 ## 7. 风险与 upstream 候选
 
-- npm 上 `@deepseek-ai/dsh-client-runtime@0.0.1-rc.1` 类型与本机运行版 0.1.0-rc.8 有版本差 —— 仅编译期类型，运行时由宿主注入；偏差过大时改用本地 d.ts 而不是追版本。
-- preset 未发布 → 本仓手写构建（见 §5）；upstream：发布 `clientBundle` 为独立包。
-- catalog 是 generated 文件：升级 harness 后跑 `pnpm run gen-client-catalog` 对比 diff，防槽位漂移。
+- DSH client runtime versions can differ from the installed host. The plugin keeps runtime shells as host-provided externals and should be revalidated when the DSH contract changes.
+- The local build is intentionally small and package-local; a future DSH shared client bundle preset can replace it.
+- Treat slot catalogs as generated host contracts. Recheck slot names and registration shapes when upgrading DSH.

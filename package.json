@@ -13,7 +13,9 @@
     "index.js",
     "host",
     "lib/client.js",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
   ],
   "license": "MIT",
   "repository": {
@@ -33,7 +35,10 @@
     "uxe:page-capability": "python3 .uxe/scripts/page-capability.py --project-root .",
     "uxe:capture": "python3 .uxe/scripts/capture.py --project-root .",
     "uxe:visual": "python3 .uxe/scripts/visual.py --project-root .",
-    "uxe:audit": "python3 .uxe/scripts/audit.py --project-root ."
+    "uxe:audit": "python3 .uxe/scripts/audit.py --project-root .",
+    "clean:client": "rm -rf lib && mkdir -p lib",
+    "prepare": "node scripts/prepare-from-git.mjs",
+    "check": "npm run build:client && npm test && npm run check:packed"
   },
   "dsh": {
     "bundle": {
@@ -48,5 +53,19 @@
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.5",
     "tsdown": "^0.12.9"
-  }
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": [
+    "reviso",
+    "deepseek-harness",
+    "dsh",
+    "document-review",
+    "agent"
+  ],
+  "bugs": {
+    "url": "https://github.com/reviso-si/reviso-dsh/issues"
+  },
+  "homepage": "https://github.com/reviso-si/reviso-dsh#readme"
 }

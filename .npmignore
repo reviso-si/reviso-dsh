@@ -1,0 +1,5 @@
+.uxe/
+.github/
+docs/
+test/
+*.log
