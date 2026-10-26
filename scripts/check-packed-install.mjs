@@ -3,6 +3,7 @@ import { access, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { parseNpmPackOutput } from './npm-pack-output.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const temp = await mkdtemp(join(tmpdir(), 'reviso-dsh-install-'))
@@ -24,7 +25,7 @@ try {
       npm_config_loglevel: 'error',
     },
   })
-  const filename = JSON.parse(output)?.[0]?.filename
+  const filename = parseNpmPackOutput(output)?.[0]?.filename
   if (typeof filename !== 'string' || filename === '') {
     throw new Error('npm pack returned no filename')
   }

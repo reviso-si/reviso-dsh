@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gunzipSync } from 'node:zlib'
+import { parseNpmPackOutput } from './npm-pack-output.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
@@ -21,7 +22,7 @@ try {
       npm_config_loglevel: 'error',
     },
   })
-  const packed = JSON.parse(output)
+  const packed = parseNpmPackOutput(output)
   const filename = packed?.[0]?.filename
   if (typeof filename !== 'string' || filename === '') throw new Error('npm pack returned no filename')
   const tarball = join(temp, filename)
