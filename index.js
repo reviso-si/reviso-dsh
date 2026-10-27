@@ -18,6 +18,7 @@ export const name = 'reviso-dsh'
 export const inject = ['tools', 'credentials']
 
 const REQUEST_TIMEOUT_MS = 30_000
+const DEFAULT_MAX_PUBLISH_JSON_BYTES = 37_748_736
 
 const publishParameters = {
   type: 'object',
@@ -154,6 +155,7 @@ function revisoPublishTool(ctx) {
           operation_id: operationId,
         }
         if (args.source_format !== undefined) body.source_format = args.source_format
+        assertPublishBodySize(body)
         const response = await postUpdate(ctx, credential, documentId, body, exec?.signal, operationId)
         const responseDocumentId = String(response.document_id || documentId)
         markPublished(credential.server, credential.workspaceId)
@@ -182,6 +184,7 @@ function revisoPublishTool(ctx) {
         body.deck_contract_version = args.deck_contract_version
       }
       if (args.parent_id !== undefined && args.parent_id !== '') body.parent_id = args.parent_id
+      assertPublishBodySize(body)
 
       const response = await postDocument(ctx, credential, body, exec?.signal, operationId)
       const responseDocumentId = String(response.document_id || '')
@@ -305,6 +308,40 @@ function publishOperationId(exec, args, sessionId) {
     ? exec.callId
     : `${sessionId}:${args.document_id || ''}:${args.base_version_id || ''}:${args.title || ''}:${args.content || ''}`
   return `op_${createHash('sha256').update(replay).digest('hex').slice(0, 40)}`
+}
+
+/**
+ * Byte ceiling for one publish request, mirroring the server-side
+ * REVISO_MAX_PUBLISH_JSON_BYTES limit.
+ * @param env - Environment map, injectable for tests.
+ * @returns Positive integer byte limit for the serialized request body.
+ */
+export function publishBodyLimit(env = process.env) {
+  const parsed = Number(env.REVISO_MAX_PUBLISH_JSON_BYTES)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_PUBLISH_JSON_BYTES
+}
+
+/**
+ * Reject a publish body that the server would bounce for size, so an
+ * oversized deck fails with an actionable message instead of the server's
+ * opaque "request body too large".
+ * @param body - Request body exactly as it will be sent.
+ * @param limitBytes - Byte ceiling; defaults to publishBodyLimit().
+ * @returns Serialized UTF-8 body size in bytes.
+ */
+export function assertPublishBodySize(body, limitBytes = publishBodyLimit()) {
+  const sizeBytes = Buffer.byteLength(JSON.stringify(body), 'utf8')
+  if (sizeBytes > limitBytes) {
+    throw new Error(
+      `payload ${mb(sizeBytes)}MB exceeds publish limit ${mb(limitBytes)}MB`
+      + ' - reduce embedded images (reference uploaded assets instead of base64 data URIs) or split the content',
+    )
+  }
+  return sizeBytes
+}
+
+function mb(bytes) {
+  return (bytes / (1024 * 1024)).toFixed(1)
 }
 
 function canonicalReviewUrl(server, documentId, explicit) {
