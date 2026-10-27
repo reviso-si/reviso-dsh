@@ -1,0 +1,87 @@
+{
+  "format": 1,
+  "title": {
+    "en": "Reviso",
+    "zh": "Reviso"
+  },
+  "description": {
+    "en": "Reviso document review integrations for DeepSeek Harness.",
+    "zh": "用于 DeepSeek Harness 的 Reviso 文档评审集成。"
+  },
+  "metadata": {
+    "categories": {
+      "documents": {
+        "title": {
+          "en": "Documents",
+          "zh": "文档"
+        }
+      }
+    },
+    "labels": {
+      "official": {
+        "title": {
+          "en": "Official",
+          "zh": "官方"
+        }
+      }
+    },
+    "sortKeys": {
+      "recommended": {
+        "title": {
+          "en": "Recommended",
+          "zh": "推荐"
+        },
+        "order": "desc"
+      }
+    }
+  },
+  "plugins": [
+    {
+      "name": "dsh-reviso",
+      "title": {
+        "en": "Reviso",
+        "zh": "Reviso"
+      },
+      "description": {
+        "en": "Publish documents for human review and read them back from a DSH session.",
+        "zh": "发布文档供人工评审，并在 DSH 会话中回读。"
+      },
+      "icon": "reviso.svg",
+      "author": "Reviso",
+      "homepage": "https://github.com/reviso-si/reviso-dsh#readme",
+      "repository": {
+        "url": "https://github.com/reviso-si/reviso-dsh"
+      },
+      "metadata": {
+        "category": "documents",
+        "keywords": [
+          "reviso",
+          "deepseek-harness",
+          "dsh",
+          "document-review",
+          "agent"
+        ],
+        "labels": [
+          "official"
+        ],
+        "sortKeys": {
+          "recommended": 1
+        }
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1793000000,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/reviso-si/reviso-dsh",
+            "commit": "036006dcd1a20541a049b59749049ddaeba6743f"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2"
+          }
+        }
+      ]
+    }
+  ]
+}

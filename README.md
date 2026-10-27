@@ -25,7 +25,14 @@ repositories. This package is only the DSH host adapter.
 
 ## Install
 
-Install from GitHub or a local checkout through the DSH plugin manager:
+Add the Reviso market index in **Plugins → Discover → Add index source**:
+
+```text
+https://raw.githubusercontent.com/reviso-si/reviso-dsh/main/market/index.json
+```
+
+Then install **Reviso** from Discover. Alternatively, install directly from
+GitHub or a local checkout through the DSH plugin manager:
 
 ```sh
 dsh plugin --profile web add github:reviso-si/reviso-dsh

@@ -28,6 +28,7 @@
     "build:client": "tsdown && node scripts/wrap-client.mjs",
     "check:packed": "node scripts/check-packed-tarball.mjs",
     "check:install": "node scripts/check-packed-install.mjs",
+    "check:market": "node scripts/check-market-index.mjs",
     "prepack": "npm run build:client && npm run check:packed",
     "test": "node --test test/*.test.mjs",
     "verify:real": "node scripts/real-publish.mjs",
@@ -41,7 +42,7 @@
     "uxe:audit": "python3 .uxe/scripts/audit.py --project-root .",
     "clean:client": "rm -rf lib && mkdir -p lib",
     "prepare": "node scripts/prepare-from-git.mjs",
-    "check": "npm run build:client && npm test && npm run check:packed && npm run check:install"
+    "check": "npm run build:client && npm test && npm run check:packed && npm run check:install && npm run check:market"
   },
   "dsh": {
     "bundle": {
@@ -55,6 +56,7 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/dsh-plugin-market-index": "0.2.1-rc.2",
     "tsdown": "^0.12.9"
   },
   "engines": {

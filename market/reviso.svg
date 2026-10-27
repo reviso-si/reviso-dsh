@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Reviso">
+  <rect width="64" height="64" rx="14" fill="#185abd"/>
+  <path d="M18 15h20l10 10v24H18z" fill="#fff"/>
+  <path d="M38 15v10h10" fill="#c7d8f7"/>
+  <path d="M24 31h18M24 37h18M24 43h12" stroke="#185abd" stroke-width="3" stroke-linecap="round"/>
+</svg>
