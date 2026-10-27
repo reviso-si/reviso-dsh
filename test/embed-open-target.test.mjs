@@ -5,6 +5,7 @@ import { allowedEmbedMessageOrigin, embedOpenTarget } from '../src/client/embedO
 const embedUrl = 'https://reviso-api.fly.dev/embed/v1/documents/doc_012345abcdef?session=ems_012345abcdef#code=rem_code_secret'
 const openUrl = 'https://reviso.work/documents/012345abcdef'
 const message = { type: 'reviso:open-external', version: 1, documentId: 'doc_012345abcdef', href: '/documents/012345abcdef' }
+const shareMessage = { ...message, type: 'reviso:open-share' }
 
 test('accepts the canonical host-mediated external document', () => {
   assert.equal(embedOpenTarget(embedUrl, openUrl, message), openUrl)
@@ -17,6 +18,12 @@ test('rejects wrong document, path, version, query, and insecure URL', () => {
   assert.equal(embedOpenTarget(embedUrl, openUrl, { ...message, version: 2 }), '')
   assert.equal(embedOpenTarget(embedUrl, `${openUrl}?x=1`, message), '')
   assert.equal(embedOpenTarget(embedUrl, 'http://reviso.work/documents/012345abcdef', message), '')
+})
+
+test('accepts host-mediated share and appends only the controlled share flag', () => {
+  assert.equal(embedOpenTarget(embedUrl, openUrl, shareMessage), `${openUrl}?share=1`)
+  assert.equal(embedOpenTarget(embedUrl, `${openUrl}?x=1`, shareMessage), '')
+  assert.equal(embedOpenTarget(embedUrl, `${openUrl}?share=0`, shareMessage), '')
 })
 
 test('allows the opaque sandbox origin and exact embed origin only', () => {

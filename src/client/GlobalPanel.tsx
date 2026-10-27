@@ -9,6 +9,7 @@ import { EmbedFrame } from './EmbedFrame.tsx'
 import { FileIcon } from './SessionView.tsx'
 import { zh, type RevisoLocaleKey } from './locales.ts'
 import { ensureStyles } from './readerStyles.ts'
+import { startPublishedEventStream } from './publishedGeneration.ts'
 
 interface GlobalPanelProps {
   t?: (key: RevisoLocaleKey) => string
@@ -90,6 +91,7 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
   const [view, setView] = useState<ViewMode>(loadView)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
+  const loadEpoch = useRef(0)
   const [embeds, setEmbeds] = useState<Record<string, EmbedState>>({})
   const iframeRefs = useRef(new Map<string, HTMLIFrameElement>())
   const [mobileView, setMobileView] = useState<'list' | 'reader'>('list')
@@ -127,13 +129,25 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
   }, [])
 
   useEffect(() => {
+    if (connection?.connected !== true) return
+    return startPublishedEventStream(event => {
+      if (event.server !== undefined && connection !== null && event.server !== connection.server) return
+      if (event.workspaceId !== undefined && connection !== null && event.workspaceId !== connection.workspaceId) return
+      clearDashboardDocumentsCache()
+      setReloadKey(value => value + 1)
+    })
+  }, [connection?.connected])
+
+  useEffect(() => {
     let alive = true
+    const epoch = ++loadEpoch.current
+    const isCurrent = () => alive && loadEpoch.current === epoch
     const load = async () => {
       setStatus('loading')
       setMessage('')
       try {
         const state = await connectionStatus()
-        if (!alive) return
+        if (!isCurrent()) return
         setConnection(state)
         if (setDashboardCacheScope(state)) {
           for (const sessionId of embedSessions.current) {
@@ -151,14 +165,14 @@ export function RevisoGlobalPanel(props: GlobalPanelProps) {
           return
         }
         const page = await dashboardDocumentsPage(50, 0, 'dsh')
-        if (!alive) return
+        if (!isCurrent()) return
         setDocs(page.rows.map(row => mapRow(row, state.server)).filter((doc): doc is SessionDoc => doc !== null))
         setHasMore(page.hasMore)
         setNextOffset(page.nextOffset)
         setLoadMoreError('')
         setStatus('live')
       } catch (error) {
-        if (!alive) return
+        if (!isCurrent()) return
         setStatus('error')
         setMessage(error instanceof Error ? error.message : String(error))
       }

@@ -14,7 +14,7 @@ import {
   resolveConnectionId, resolvePersonalWorkspace, storeCredential,
 } from './credentials.js'
 import { RevisoApiError, apiErrorPayload, errorFromResponse, messageOf } from './errors.js'
-import { publishedGeneration } from './generation.js'
+import { publishedGeneration, subscribePublished } from './generation.js'
 
 const DEFAULT_SERVER = 'https://reviso.work'
 const PENDING_TTL_MS = 10 * 60 * 1000
@@ -36,7 +36,14 @@ export function createOAuthBridge(ctx, options = {}) {
   const pending = new Map()
   const clients = new Map()
   const activeEmbeds = new Set()
+  const eventClients = new Set()
   const admission = bridgeAdmission(ctx)
+  const unsubscribePublished = subscribePublished(event => {
+    const payload = `event: published\ndata: ${JSON.stringify(event)}\n\n`
+    for (const client of eventClients) {
+      try { client.res.write(payload) } catch { eventClients.delete(client) }
+    }
+  })
   const disposers = [
     ctx.webServer.register({
       kind: 'exact',
@@ -83,6 +90,11 @@ export function createOAuthBridge(ctx, options = {}) {
       path: '/plugins/reviso/dashboard',
       handler: (req, res) => handleDashboard(ctx, req, res, admission),
     }),
+    ctx.webServer.register({
+      kind: 'exact',
+      path: '/plugins/reviso/events',
+      handler: (req, res) => handlePublishedEvents(ctx, req, res, admission, eventClients),
+    }),
   ]
   let disposed
   let disposing
@@ -90,6 +102,11 @@ export function createOAuthBridge(ctx, options = {}) {
     if (disposed) return disposed
     if (disposing !== undefined) return disposing
     disposing = (async () => {
+      unsubscribePublished()
+      for (const client of eventClients) {
+        try { client.res.end() } catch {}
+      }
+      eventClients.clear()
       const embedFailures = await revokeActiveEmbeds(ctx, activeEmbeds)
       for (const dispose of disposers) {
         try { await dispose() } catch {}
@@ -120,6 +137,35 @@ async function handleStatus(ctx, req, res, admission, configuredEmbedOrigin = ''
       embedOrigin: advertisedEmbedOrigin,
     },
   })
+}
+
+async function handlePublishedEvents(ctx, req, res, admission, clients) {
+  if (!requireAdmission(req, res, admission)) return
+  const token = await describe(ctx, TOKEN_REF)
+  const server = await resolveRef(ctx, SERVER_REF)
+  const workspaceId = await resolveRef(ctx, WORKSPACE_REF)
+  if (!token.configured || server === '' || workspaceId === '') {
+    sendJson(res, 409, { error: 'not_connected', code: 'not_connected', retryable: false, status: 409 })
+    return
+  }
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-store',
+    Connection: 'keep-alive',
+  })
+  res.write(`event: ready\ndata: ${JSON.stringify({ generation: publishedGeneration(server, workspaceId) })}\n\n`)
+  const client = { res, server, workspaceId }
+  clients.add(client)
+  const heartbeat = setInterval(() => {
+    try { res.write(': keepalive\n\n') } catch { clients.delete(client) }
+  }, 25_000)
+  heartbeat.unref?.()
+  const cleanup = () => {
+    clearInterval(heartbeat)
+    clients.delete(client)
+  }
+  req.once?.('close', cleanup)
+  res.once?.('close', cleanup)
 }
 
 async function handleDocuments(ctx, req, res, admission) {

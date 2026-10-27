@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
-import { test } from 'node:test'
+import { afterEach, test } from 'node:test'
 import { createOAuthBridge } from '../host/oauth.js'
+import { resetPublishedGenerations } from '../host/generation.js'
+
+afterEach(() => resetPublishedGenerations())
 
 function response() {
   return {
@@ -11,9 +14,14 @@ function response() {
       this.status = status
       this.headers = headers
     },
+    write(body = '') {
+      this.body += body
+      return true
+    },
     end(body = '') {
       this.body += body
     },
+    once() {},
   }
 }
 
@@ -165,6 +173,24 @@ function json(status, value) {
   })
 }
 
+
+test('publish event stream sends ready and published events to connected browsers', async () => {
+  const { routes, values, dispose } = setupBridge()
+  values.set('REVISO_DSH_TOKEN', 'rak_events')
+  values.set('REVISO_DSH_SERVER', 'https://reviso.work')
+  values.set('REVISO_DSH_WORKSPACE_ID', 'wsp_personal')
+  const stream = response()
+  await routes.get('/plugins/reviso/events')(request('/plugins/reviso/events'), stream)
+  assert.equal(stream.status, 200)
+  assert.match(stream.headers['Content-Type'], /text\/event-stream/)
+  assert.match(stream.body, /event: ready/)
+  const { markPublished } = await import('../host/generation.js')
+  markPublished('https://reviso.work', 'wsp_personal')
+  assert.match(stream.body, /event: published/)
+  assert.match(stream.body, /"workspaceId":"wsp_personal"/)
+  await dispose()
+  assert.match(stream.body, /event: ready/)
+})
 
 test('dashboard forwards DSH source scope while retaining the host bridge', async () => {
   const { routes, values } = setupBridge()

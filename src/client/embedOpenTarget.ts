@@ -10,7 +10,7 @@ export function embedOpenTarget(
     documentId?: string
     href?: string
   } | null
-  if (value?.type !== 'reviso:open-external' || value.version !== 1) return ''
+  if (value?.version !== 1) return ''
   let embedOrigin = ''
   let target: URL
   try {
@@ -19,6 +19,8 @@ export function embedOpenTarget(
   } catch {
     return ''
   }
+  const wantsShare = value.type === 'reviso:open-share'
+  if (value.type !== 'reviso:open-external' && !wantsShare) return ''
   if (target.protocol !== 'https:'
       && !(target.protocol === 'http:'
         && (target.hostname === '127.0.0.1' || target.hostname === 'localhost'))) {
@@ -28,6 +30,8 @@ export function embedOpenTarget(
   const expectedPath = `/documents/${value.documentId!.slice(4)}`
   if (value.href !== expectedPath || target.pathname !== expectedPath
       || target.search !== '' || target.hash !== '' || embedOrigin === '') return ''
+  if (!wantsShare) return target.toString()
+  target.searchParams.set('share', '1')
   return target.toString()
 }
 
@@ -38,4 +42,8 @@ export function allowedEmbedMessageOrigin(actual: string, embedUrl: string): boo
   } catch {
     return false
   }
+}
+
+export function embedShareTarget(embedUrl: string, openUrl: string, data: unknown): string {
+  return embedOpenTarget(embedUrl, openUrl, data)
 }
