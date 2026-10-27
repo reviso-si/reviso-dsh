@@ -17,12 +17,11 @@ test('published event stream reloads on host publish completion', () => {
     removeEventListener(name, listener) { if (listeners.get(name) === listener) listeners.delete(name) }
     close() { closed = true }
   }
-  let reloads = 0
-  const stop = startPublishedEventStream(() => { reloads += 1 })
-  listeners.get('published')?.()
-  listeners.get('published')?.()
+  const events = []
+  const stop = startPublishedEventStream(event => events.push(event))
+  listeners.get('published')?.({ data: JSON.stringify({ server: 'https://reviso.work', workspaceId: 'wsp_1', generation: 2 }) })
   stop()
-  assert.equal(reloads, 2)
+  assert.deepEqual(events, [{ server: 'https://reviso.work', workspaceId: 'wsp_1', generation: 2 }])
   assert.equal(closed, true)
   assert.equal(listeners.has('published'), false)
 })
