@@ -63,14 +63,20 @@ JSON.
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm run build:client
-npm test
-pnpm run check:packed
+pnpm run check
+npm pack --dry-run
 ```
 
-The published npm tarball contains `index.js`, `host/`, the rebuilt
-`lib/client.js`, and `cordis.patch.yml`. Generated client code is validated by
-the packed-tarball check.
+`pnpm run check` runs the unit/integration suite, rebuilds the client bundle,
+inspects the packed tarball, and installs that tarball into a temporary prefix
+to verify its ESM import. When a local `dsh` executable is unavailable, the
+real Host ToolRuntime integration test reports `skip`; the public GitHub CI does
+not claim to have executed a real Host smoke test in that environment.
+
+The published npm tarball contains 12 files, including `index.js`, `host/`
+(credentials, errors, generation, and OAuth modules), the rebuilt `lib/client.js`,
+`cordis.patch.yml`, `README.md`, `SECURITY.md`, and `docs/client-face-contract.md`. Generated client code is validated by the
+packed-tarball check.
 
 ## Security model
 
