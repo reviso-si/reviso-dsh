@@ -78,6 +78,16 @@ before(async () => {
           : '{"error":{"code":"CAS_CONFLICT","message":"base_version_changed"}}')
         return
       }
+      if (req.url === '/api/documents/doc_123/assets') {
+        res.writeHead(201, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          asset_id: 'ast_123',
+          url: '/api/documents/doc_123/assets/ast_123',
+          content_type: 'image/png',
+          size_bytes: 68,
+        }))
+        return
+      }
       if (req.url === '/api/documents') {
         if (unauthorizedOnce) {
           unauthorizedOnce = false
@@ -403,6 +413,60 @@ test('updates an existing document without create-only fields or a default sourc
   })
   assert.match(captured[2].body.operation_id, /^op_/)
   assert.equal(Object.hasOwn(captured[2].body, 'deck_contract_version'), false)
+})
+
+
+
+test('uploads embedded deck images before the final CAS update', async () => {
+  captured = []
+  updateStatus = 201
+  updateResponse = {
+    document_id: 'doc_123',
+    review_url: `${baseUrl}/documents/doc_123`,
+    version_id: 'ver_updated',
+    workspace_id: 'wsp_personal',
+  }
+  const tool = registerTool(credentialProvider({
+    REVISO_DSH_TOKEN: 'rak_test',
+    REVISO_DSH_WORKSPACE_ID: 'wsp_personal',
+    REVISO_DSH_SERVER: baseUrl,
+  }))
+  const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z0YQAAAAASUVORK5CYII='
+  const deck = '<div class="hr-deck" data-aspect-ratio="16:9" data-contract-version="html-deck/1">'
+    + '<section class="hr-slide" data-slide-id="s01">'
+    + `<img src="${image}" alt="pixel" width="1" height="1">`
+    + '</section></div>'
+
+  const result = await tool.execute({
+    title: 'Large deck',
+    content: deck,
+    source_format: 'html',
+    document_kind: 'html_deck',
+    deck_contract_version: 'html-deck/1',
+  }, execContext('sess_123'))
+
+  const urls = captured.map(row => row.url)
+  assert.deepEqual(urls, [
+    '/api/agent-connection/self',
+    '/api/documents?session_key=dsh%3Asess_123',
+    '/api/documents',
+    '/api/documents/doc_123/assets',
+    '/api/documents/doc_123/agent-update',
+  ])
+  const draft = captured[2].body
+  const upload = captured[3].body
+  const update = captured[4].body
+  assert.equal(draft.document_kind, 'html_deck')
+  assert.doesNotMatch(draft.content, /data:image\//)
+  assert.equal(upload.content_type, 'image/png')
+  assert.match(upload.operation_id, /-asset-0-/)
+  assert.equal(update.base_version_id, 'ver_created')
+  assert.doesNotMatch(update.content, /data:image\//)
+  assert.match(update.content, /\/api\/documents\/doc_123\/assets\/ast_123/)
+  assert.equal(result.updated, false)
+  assert.equal(result.version_id, 'ver_updated')
+
+  updateStatus = 201
 })
 
 test('update preserves an explicit source format', async () => {

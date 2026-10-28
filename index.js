@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { createOAuthBridge } from './host/oauth.js'
 import { readCredential } from './host/credentials.js'
+import { draftDeckContent, findEmbeddedImages, rewriteEmbeddedImages, uploadOperationId } from './host/deck-assets.js'
 import { errorFromResponse, messageOf } from './host/errors.js'
 import { markPublished } from './host/generation.js'
 
@@ -38,6 +39,10 @@ const publishParameters = {
     allow_duplicate: {
       type: 'boolean',
       description: 'Allow creating another active document with the same title in this session.',
+    },
+    upload_images: {
+      type: 'boolean',
+      description: 'For html_deck content, upload embedded data:image images and rewrite them to hosted asset URLs (default true).',
     },
     source_format: {
       type: 'string',
@@ -126,6 +131,10 @@ function revisoPublishTool(ctx) {
         throw new Error('document_id and base_version_id must be provided together')
       }
       const update = documentId !== ''
+      const embeddedImages = findEmbeddedImages(args.content)
+      const uploadImages = args.upload_images !== false
+        && embeddedImages.length > 0
+        && (update ? args.deck_contract_version !== undefined : args.document_kind === 'html_deck')
 
       if (update) {
         if (args.document_kind !== undefined) {
@@ -143,13 +152,19 @@ function revisoPublishTool(ctx) {
         throw new Error('title is required when creating a document')
       }
 
-      const credential = await readCredential(ctx)
+      let credential = await readCredential(ctx)
       if (update) {
         if (args.deck_contract_version !== undefined) {
           await assertDeckUpdateTarget(credential, documentId, exec?.signal)
         }
+        let content = args.content
+        if (uploadImages) {
+          content = await uploadEmbeddedImages(
+            ctx, documentId, args.content, embeddedImages, credential,
+            operationId, exec?.signal)
+        }
         const body = {
-          content: args.content,
+          content,
           base_version_id: baseVersionId,
           description: args.description || 'Published from DeepSeek Harness',
           operation_id: operationId,
@@ -169,9 +184,8 @@ function revisoPublishTool(ctx) {
       }
 
       await preflightCreate(credential, sessionId, args, exec?.signal)
-      const body = {
+      const baseBody = {
         title: args.title,
-        content: args.content,
         source_format: args.source_format || 'markdown',
         description: args.description || 'Published from DeepSeek Harness',
         workspace_id: credential.workspaceId,
@@ -179,25 +193,103 @@ function revisoPublishTool(ctx) {
         source_session_id: sessionId,
         operation_id: operationId,
       }
-      if (args.document_kind !== undefined) body.document_kind = args.document_kind
+      if (args.document_kind !== undefined) baseBody.document_kind = args.document_kind
       if (args.deck_contract_version !== undefined) {
-        body.deck_contract_version = args.deck_contract_version
+        baseBody.deck_contract_version = args.deck_contract_version
       }
-      if (args.parent_id !== undefined && args.parent_id !== '') body.parent_id = args.parent_id
-      assertPublishBodySize(body)
+      if (args.parent_id !== undefined && args.parent_id !== '') baseBody.parent_id = args.parent_id
 
-      const response = await postDocument(ctx, credential, body, exec?.signal, operationId)
-      const responseDocumentId = String(response.document_id || '')
+      let response
+      let responseDocumentId
+      let reviewUrl
+      let workspaceId
+      let versionId
+      if (uploadImages) {
+        const draftBody = {
+          ...baseBody,
+          content: draftDeckContent(args.title),
+        }
+        assertPublishBodySize(draftBody)
+        const created = await postDocument(ctx, credential, draftBody, exec?.signal, operationId)
+        responseDocumentId = String(created.document_id || '')
+        const baseVersion = String(created.version_id || '')
+        if (responseDocumentId === '' || baseVersion === '') {
+          throw new Error('Reviso draft create response had no document/version id')
+        }
+        const content = await uploadEmbeddedImages(
+          ctx, responseDocumentId, args.content, embeddedImages, credential,
+          operationId, exec?.signal)
+        const updateBody = {
+          content,
+          base_version_id: baseVersion,
+          description: args.description || 'Published from DeepSeek Harness',
+          operation_id: `${operationId}-final`.slice(0, 199),
+          source_format: baseBody.source_format,
+        }
+        if (baseBody.document_kind !== undefined) updateBody.document_kind = baseBody.document_kind
+        if (baseBody.deck_contract_version !== undefined) {
+          updateBody.deck_contract_version = baseBody.deck_contract_version
+        }
+        assertPublishBodySize(updateBody)
+        response = await postUpdate(
+          ctx, credential, responseDocumentId, updateBody, exec?.signal,
+          updateBody.operation_id,
+        )
+        reviewUrl = response.review_url || created.review_url
+        workspaceId = response.workspace_id || created.workspace_id || credential.workspaceId
+        versionId = response.version_id || ''
+      } else {
+        const body = { ...baseBody, content: args.content }
+        assertPublishBodySize(body)
+        response = await postDocument(ctx, credential, body, exec?.signal, operationId)
+        responseDocumentId = String(response.document_id || '')
+        reviewUrl = response.review_url
+        workspaceId = response.workspace_id || credential.workspaceId
+        versionId = response.version_id || ''
+      }
       markPublished(credential.server, credential.workspaceId)
       return {
         document_id: responseDocumentId,
-        review_url: canonicalReviewUrl(credential.server, responseDocumentId, response.review_url),
-        workspace_id: String(response.workspace_id || credential.workspaceId),
+        review_url: canonicalReviewUrl(credential.server, responseDocumentId, reviewUrl),
+        workspace_id: String(workspaceId),
         updated: false,
-        version_id: String(response.version_id || ''),
+        version_id: String(versionId),
       }
     },
   }
+}
+
+async function uploadEmbeddedImages(ctx, documentId, content, images, credential, baseOperationId, callerSignal) {
+  const uploads = []
+  let current = credential
+  for (let index = 0; index < images.length; index += 1) {
+    const image = images[index]
+    const body = {
+      content_type: image.mime,
+      data_base64: image.encoded,
+      file_name: `image-${index + 1}.${image.mime.split('/')[1].replace('jpeg', 'jpg')}`,
+      operation_id: uploadOperationId(baseOperationId, index, image),
+    }
+    const path = `/api/documents/${encodeURIComponent(documentId)}/assets`
+    let result = await requestAttempt(current, 'POST', path, body, callerSignal, body.operation_id)
+    if (result.status === 401 && current.refreshToken !== '') {
+      current = await readCredential(ctx, { forceRefresh: true })
+      result = await requestAttempt(current, 'POST', path, body, callerSignal, body.operation_id)
+    }
+    if (result.status < 200 || result.status >= 300) {
+      throw errorFromResponse(result.status, result.text)
+    }
+    let payload
+    try {
+      payload = JSON.parse(result.text)
+    } catch {
+      throw new Error('Reviso image upload returned invalid JSON')
+    }
+    const url = String(payload?.url || '')
+    if (url === '') throw new Error('Reviso image upload returned no asset URL')
+    uploads.push(url)
+  }
+  return rewriteEmbeddedImages(content, uploads)
 }
 
 async function postDocument(ctx, credential, body, callerSignal, operationId) {
