@@ -134,7 +134,7 @@ function revisoPublishTool(ctx) {
       const embeddedImages = findEmbeddedImages(args.content)
       const uploadImages = args.upload_images !== false
         && embeddedImages.length > 0
-        && (update ? args.deck_contract_version !== undefined : args.document_kind === 'html_deck')
+        && (update || args.document_kind === 'html_deck')
 
       if (update) {
         if (args.document_kind !== undefined) {

@@ -469,6 +469,48 @@ test('uploads embedded deck images before the final CAS update', async () => {
   updateStatus = 201
 })
 
+test('uploads embedded deck images on update without create-only deck identity', async () => {
+  captured = []
+  documentKind = 'html_deck'
+  updateStatus = 201
+  updateResponse = {
+    document_id: 'doc_123',
+    review_url: `${baseUrl}/documents/doc_123`,
+    version_id: 'ver_updated',
+    workspace_id: 'wsp_personal',
+  }
+  const tool = registerTool(credentialProvider({
+    REVISO_DSH_TOKEN: 'rak_test',
+    REVISO_DSH_WORKSPACE_ID: 'wsp_personal',
+    REVISO_DSH_SERVER: baseUrl,
+  }))
+  const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z0YQAAAAASUVORK5CYII='
+  const deck = '<div class="hr-deck" data-aspect-ratio="16:9" data-contract-version="html-deck/1">'
+    + '<section class="hr-slide" data-slide-id="s01">'
+    + `<img src="${image}" alt="pixel" width="1" height="1">`
+    + '</section></div>'
+
+  await tool.execute({
+    content: deck,
+    document_id: 'doc_123',
+    base_version_id: 'ver_1',
+    source_format: 'html',
+  }, execContext('sess_123'))
+
+  assert.deepEqual(captured.map(row => row.url), [
+    '/api/agent-connection/self',
+    '/api/documents/doc_123/assets',
+    '/api/documents/doc_123/agent-update',
+  ])
+  const upload = captured[1].body
+  const update = captured[2].body
+  assert.equal(upload.content_type, 'image/png')
+  assert.equal(update.base_version_id, 'ver_1')
+  assert.doesNotMatch(update.content, /data:image\//)
+  assert.match(update.content, /\/api\/documents\/doc_123\/assets\/ast_123/)
+})
+
+
 test('update preserves an explicit source format', async () => {
   captured = []
   const tool = registerTool(credentialProvider({
