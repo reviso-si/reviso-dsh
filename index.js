@@ -131,10 +131,23 @@ function revisoPublishTool(ctx) {
         throw new Error('document_id and base_version_id must be provided together')
       }
       const update = documentId !== ''
+      const declaredDeck = /class\s*=\s*(?:"[^"]*\bhr-deck\b[^"]*"|'[^']*\bhr-deck\b[^']*')/iu
+        .test(args.content)
+      if (!update && declaredDeck) {
+        const declaredVersion = /data-contract-version\s*=\s*(?:"([^"]+)"|'([^']+)')/iu
+          .exec(args.content)
+        args = {
+          ...args,
+          ...(args.document_kind === undefined ? { document_kind: 'html_deck' } : {}),
+          ...(args.deck_contract_version === undefined && declaredVersion
+            ? { deck_contract_version: declaredVersion[1] || declaredVersion[2] }
+            : {}),
+        }
+      }
       const embeddedImages = findEmbeddedImages(args.content)
       const uploadImages = args.upload_images !== false
         && embeddedImages.length > 0
-        && (update || args.document_kind === 'html_deck')
+        && (update || args.document_kind === 'html_deck' || declaredDeck)
 
       if (update) {
         if (args.document_kind !== undefined) {

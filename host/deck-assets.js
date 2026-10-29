@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto'
 
-const DATA_URI = /data:(image\/(?:png|jpeg|gif|webp));base64,([A-Za-z0-9+/=]+)/gi
-const ALLOWED = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
+const IMG_TAG = /<img\b[^>]*>/gis
+const SRC_ATTR = /\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
+const DATA_URI = /^data:(image\/(?:png|jpeg|gif|webp));base64,([^\s"']*)$/i
+const ASSET_URL = /^\/api\/documents\/[^/\s]+\/assets\/[^/\s]+$/u
 const MAX_DECODED = 5 * 1024 * 1024
 
 function decodedBytes(encoded) {
@@ -17,14 +19,35 @@ function decodedBytes(encoded) {
 export function findEmbeddedImages(content) {
   if (typeof content !== 'string') throw new TypeError('deck content must be a string')
   const found = []
-  for (const match of content.matchAll(DATA_URI)) {
+  for (const tag of content.matchAll(IMG_TAG)) {
+    const tagText = String(tag[0])
+    const src = SRC_ATTR.exec(tagText)
+    if (!src) continue
+    const value = String(src[1] ?? src[2] ?? src[3] ?? '')
+    const match = DATA_URI.exec(value)
+    if (!match) continue
     const mime = String(match[1]).toLowerCase()
     const encoded = String(match[2])
-    if (!ALLOWED.has(mime)) continue
     const data = decodedBytes(encoded)
-    if (!data || data.length === 0 || data.length > MAX_DECODED) continue
-    const start = match.index ?? 0
-    found.push({ mime, encoded, decoded: data, start, end: start + match[0].length })
+    if (!data) throw new Error(`embedded ${mime} is not valid base64`)
+    if (data.length === 0) throw new Error(`embedded ${mime} is empty`)
+    if (data.length > MAX_DECODED) {
+      throw new Error(
+        `embedded ${mime} is ${data.length} bytes; maximum upload image size is ${MAX_DECODED} bytes`,
+      )
+    }
+    const tagStart = tag.index ?? 0
+    const srcOffset = tagText.indexOf(src[0])
+    const quotedOffset = src[0].indexOf(value)
+    const start = tagStart + srcOffset + quotedOffset
+    found.push({
+      mime,
+      encoded,
+      decoded: data,
+      start,
+      end: start + value.length,
+      rawUri: value,
+    })
   }
   return found
 }
@@ -43,7 +66,10 @@ export function rewriteEmbeddedImages(content, uploads) {
     if (image.start < previousEnd || image.end < image.start) {
       throw new Error('embedded image positions overlap')
     }
-    if (!url) throw new Error('upload returned an empty asset URL')
+    if (image.rawUri !== content.slice(image.start, image.end)) {
+      throw new Error('embedded image positions changed during upload')
+    }
+    if (!ASSET_URL.test(url)) throw new Error('upload returned an invalid asset URL')
     pieces.push(content.slice(cursor, image.start), url)
     cursor = image.end
     previousEnd = image.end

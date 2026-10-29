@@ -511,6 +511,89 @@ test('uploads embedded deck images on update without create-only deck identity',
 })
 
 
+test('detects a declared deck without an explicit document_kind and uploads images', async () => {
+  captured = []
+  updateStatus = 201
+  updateResponse = {
+    document_id: 'doc_123',
+    review_url: `${baseUrl}/documents/doc_123`,
+    version_id: 'ver_updated',
+    workspace_id: 'wsp_personal',
+  }
+  const tool = registerTool(credentialProvider({
+    REVISO_DSH_TOKEN: 'rak_test',
+    REVISO_DSH_WORKSPACE_ID: 'wsp_personal',
+    REVISO_DSH_SERVER: baseUrl,
+  }))
+  const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z0YQAAAAASUVORK5CYII='
+  const deck = '<div class="hr-deck" data-aspect-ratio="16:9" data-contract-version="html-deck/1">'
+    + '<section class="hr-slide" data-slide-id="s01">'
+    + `<img src="${image}" alt="pixel">`
+    + '</section></div>'
+
+  await tool.execute({
+    title: 'Declared deck',
+    content: deck,
+    source_format: 'html',
+  }, execContext('sess_123'))
+
+  assert.deepEqual(captured.map(row => row.url), [
+    '/api/agent-connection/self',
+    '/api/documents?session_key=dsh%3Asess_123',
+    '/api/documents',
+    '/api/documents/doc_123/assets',
+    '/api/documents/doc_123/agent-update',
+  ])
+  assert.equal(captured[2].body.document_kind, 'html_deck')
+  assert.equal(captured[2].body.deck_contract_version, 'html-deck/1')
+  assert.match(captured[4].body.content, /\/api\/documents\/doc_123\/assets\/ast_123/)
+})
+
+test('only img src data URIs are uploaded and rewritten', async () => {
+  captured = []
+  updateStatus = 201
+  const tool = registerTool(credentialProvider({
+    REVISO_DSH_TOKEN: 'rak_test',
+    REVISO_DSH_WORKSPACE_ID: 'wsp_personal',
+    REVISO_DSH_SERVER: baseUrl,
+  }))
+  const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z0YQAAAAASUVORK5CYII='
+  const deck = '<div class="hr-deck"><code>' + image + '</code>'
+    + `<img src="${image}"></div>`
+
+  await tool.execute({
+    title: 'Deck with code',
+    content: deck,
+    source_format: 'html',
+    document_kind: 'html_deck',
+  }, execContext('sess_123'))
+
+  const update = captured.find(row => row.url === '/api/documents/doc_123/agent-update')
+  assert.equal((update.body.content.match(/data:image\//g) || []).length, 1)
+  assert.match(update.body.content, /\/api\/documents\/doc_123\/assets\/ast_123/)
+})
+
+test('rejects an oversized supported image before creating a draft', async () => {
+  captured = []
+  const tool = registerTool(credentialProvider({
+    REVISO_DSH_TOKEN: 'rak_test',
+    REVISO_DSH_WORKSPACE_ID: 'wsp_personal',
+    REVISO_DSH_SERVER: baseUrl,
+  }))
+  const oversized = Buffer.alloc(5 * 1024 * 1024 + 1, 1).toString('base64')
+  const deck = `<div class="hr-deck"><img src="data:image/png;base64,${oversized}"></div>`
+  await assert.rejects(
+    () => tool.execute({
+      title: 'Too large',
+      content: deck,
+      source_format: 'html',
+      document_kind: 'html_deck',
+    }, execContext('sess_123')),
+    /maximum upload image size/,
+  )
+  assert.equal(captured.length, 0)
+})
+
 test('update preserves an explicit source format', async () => {
   captured = []
   const tool = registerTool(credentialProvider({
