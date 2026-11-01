@@ -1,6 +1,6 @@
 {
   "name": "dsh-reviso",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Reviso for DeepSeek Harness: publish agent output for human review and find it again from the session.",
   "type": "module",
   "main": "index.js",

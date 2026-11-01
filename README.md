@@ -31,10 +31,12 @@ Add the Reviso market index in **Plugins → Discover → Add index source**:
 https://raw.githubusercontent.com/reviso-si/reviso-dsh/main/market/index.json
 ```
 
-Then install **Reviso** from Discover. Alternatively, install directly from
-GitHub or a local checkout through the DSH plugin manager:
+Then install **Reviso** from Discover. Alternatively, install a pinned release
+tarball or the repository directly through the DSH plugin manager:
 
 ```sh
+dsh plugin --profile web add https://github.com/reviso-si/reviso-dsh/releases/download/v0.1.1/dsh-reviso-0.1.1.tgz
+# or track the repository head:
 dsh plugin --profile web add github:reviso-si/reviso-dsh
 # or, while developing locally:
 dsh plugin --profile web add /absolute/path/to/reviso-dsh
