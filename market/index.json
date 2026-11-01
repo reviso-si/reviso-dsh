@@ -70,6 +70,18 @@
       },
       "versions": [
         {
+          "version": "0.1.1",
+          "publishTimestamp": 1793585000,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/reviso-si/reviso-dsh",
+            "commit": "59c88a87cb06e2dd6f687fc81803abfa78e7eb86"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2"
+          }
+        },
+        {
           "version": "0.1.0",
           "publishTimestamp": 1793000000,
           "source": {
