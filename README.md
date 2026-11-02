@@ -1,5 +1,7 @@
 # Reviso for DeepSeek Harness
 
+[![Listed on dsh-plugin.org](https://dsh-plugin.org/badges/listed.svg)](https://dsh-plugin.org/plugins/reviso-si/reviso-dsh)
+
 Reviso lets a coding agent publish its work for human review, then find the same
 document again from the session that created it. This repository is the
 DeepSeek Harness (DSH) integration.
